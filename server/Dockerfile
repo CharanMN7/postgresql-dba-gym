@@ -42,13 +42,15 @@ COPY --chown=appuser:appuser requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # ---- application code -------------------------------------------------------
-COPY --chown=appuser:appuser app /app/app
+# Build context is the repo root: `docker build -f server/Dockerfile .`
+COPY --chown=appuser:appuser server /app/server
 COPY --chown=appuser:appuser sql /app/sql
 COPY --chown=appuser:appuser scripts /app/scripts
-COPY --chown=appuser:appuser openenv.yaml /app/openenv.yaml
-COPY --chown=appuser:appuser README.md /app/README.md
-COPY --chown=appuser:appuser inference.py /app/inference.py
+COPY --chown=appuser:appuser models.py __init__.py client.py /app/
+COPY --chown=appuser:appuser pyproject.toml openenv.yaml README.md /app/
+COPY --chown=appuser:appuser inference.py demo.py /app/
 RUN chmod +x /app/scripts/start.sh
+ENV PYTHONPATH=/app
 
 USER appuser
 

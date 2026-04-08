@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Dict
 
-from app.tasks.base import BaseTask
-from app.tasks.index_optimization import IndexOptimizationTask
-from app.tasks.performance_diagnosis import PerformanceDiagnosisTask
-from app.tasks.schema_migration import SchemaMigrationTask
+from server.tasks.base import BaseTask
+from server.tasks.index_optimization import IndexOptimizationTask
+from server.tasks.performance_diagnosis import PerformanceDiagnosisTask
+from server.tasks.schema_migration import SchemaMigrationTask
 
 
 def build_task_registry() -> Dict[str, BaseTask]:

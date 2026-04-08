@@ -29,7 +29,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from app.tasks.base import BaseTask, GradingResult
+from server.tasks.base import BaseTask, GradingResult
 
 logger = logging.getLogger(__name__)
 

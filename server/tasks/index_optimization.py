@@ -32,7 +32,7 @@ import statistics
 from pathlib import Path
 from typing import List, Set
 
-from app.tasks.base import BaseTask, GradingResult
+from server.tasks.base import BaseTask, GradingResult
 
 logger = logging.getLogger(__name__)
 

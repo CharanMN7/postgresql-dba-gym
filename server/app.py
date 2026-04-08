@@ -28,11 +28,12 @@ from fastapi import HTTPException
 
 from openenv.core.env_server.http_server import create_app
 
-from app.environment import (
-    DBAAction,
-    DBAObservation,
-    PostgresDBAEnvironment,
-)
+try:
+    from ..models import DBAAction, DBAObservation
+    from .postgres_dba_gym_environment import PostgresDBAEnvironment
+except ImportError:  # pragma: no cover
+    from models import DBAAction, DBAObservation
+    from server.postgres_dba_gym_environment import PostgresDBAEnvironment
 
 logging.basicConfig(
     level=os.getenv("DBA_GYM_LOG_LEVEL", "INFO"),
@@ -113,11 +114,11 @@ def _shutdown_env() -> None:
 
 
 def main() -> None:
-    """Convenience entrypoint when running ``python -m app.server``."""
+    """Convenience entrypoint when running ``python -m server.app``."""
     import uvicorn
 
     uvicorn.run(
-        "app.server:app",
+        "server.app:app",
         host="0.0.0.0",
         port=int(os.getenv("PORT", "8000")),
         workers=1,

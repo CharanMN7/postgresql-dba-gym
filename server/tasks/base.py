@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List
 
 if TYPE_CHECKING:
-    from app.environment import DBAObservation, PostgresDBAEnvironment
+    from models import DBAObservation
+    from server.postgres_dba_gym_environment import PostgresDBAEnvironment
 
 
 @dataclass
@@ -88,7 +89,10 @@ class BaseTask(ABC):
         ``output`` and ``task_description`` so the agent's first
         ``user`` message has the full prompt.
         """
-        from app.environment import DBAObservation
+        try:
+            from ...models import DBAObservation
+        except ImportError:  # pragma: no cover
+            from models import DBAObservation
 
         description = self.get_description()
         return DBAObservation(

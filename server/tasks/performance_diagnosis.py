@@ -41,8 +41,8 @@ from typing import Dict, List, Optional, Tuple
 
 import psycopg2
 
-from app.db import open_dedicated_connection
-from app.tasks.base import BaseTask, GradingResult
+from server.db import open_dedicated_connection
+from server.tasks.base import BaseTask, GradingResult
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +130,7 @@ class PerformanceDiagnosisTask(BaseTask):
         "table bloat, bad GUCs, and an idle-in-transaction blocker."
     )
     MAX_STEPS = 30
-    SUCCESS_THRESHOLD = 0.85
+    SUCCESS_THRESHOLD = 0.95
     SEED_PATH = Path("/app/sql/seed_performance_diagnosis.sql")
 
     def __init__(self) -> None:
