@@ -1,0 +1,8 @@
+openenv-core>=0.2.3
+fastapi>=0.115.0
+uvicorn[standard]>=0.27.0
+psycopg2-binary>=2.9.9
+pydantic>=2.7.0
+openai>=1.30.0
+requests>=2.31.0
+sqlparse>=0.5.0
