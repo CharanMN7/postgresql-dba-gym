@@ -10,7 +10,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PG_MAJOR=16 \
     PGDATA=/var/lib/postgresql/data \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    ENABLE_WEB_INTERFACE=true
 
 # ---- system deps + Postgres apt repo ---------------------------------------
 RUN apt-get update \
