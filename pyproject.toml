@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openenv-postgres-dba-gym"
+version = "0.1.0"
+description = "PostgreSQL DBA Gym environment for OpenEnv — live Postgres 16 + deterministic task grading"
+requires-python = ">=3.11"
+dependencies = [
+    "openenv-core[core]>=0.2.3",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.27.0",
+    "psycopg2-binary>=2.9.9",
+    "pydantic>=2.7.0",
+    "openai>=1.30.0",
+    "sqlparse>=0.5.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+# Server entry point - enables running via: uv run --project . server
+# or: python -m postgres_dba_gym.server.app
+server = "postgres_dba_gym.server.app:main"
+
+[tool.setuptools]
+include-package-data = true
+packages = ["postgres_dba_gym", "postgres_dba_gym.server", "postgres_dba_gym.server.tasks"]
+package-dir = { "postgres_dba_gym" = ".", "postgres_dba_gym.server" = "server", "postgres_dba_gym.server.tasks" = "server/tasks" }

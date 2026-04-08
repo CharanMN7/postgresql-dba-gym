@@ -1,0 +1,38 @@
+# PostgreSQL DBA Gym — local development via Docker Compose
+#
+# Usage:
+#   cp .env.example .env          # then edit .env and set HF_TOKEN
+#   make build                    # docker compose build
+#   make up                       # start detached, wait for healthy
+#   make smoke                    # curl-based smoke test
+#   make demo                     # run demo.py inside the container
+#   make inference                # run inference.py inside the container
+#   make shell                    # bash shell inside the container
+#   make down                     # stop and remove
+#
+# Env vars (HF_TOKEN, API_BASE_URL, MODEL_NAME, ENV_URL) are loaded from
+# the host `.env` file at container start — nothing is baked into the image.
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: pg-dba-gym:latest
+    container_name: pg-dba-gym
+    env_file:
+      - .env
+    environment:
+      # Override ENV_URL inside the container so `docker compose exec server
+      # python demo.py` / `python inference.py` hit the in-container server
+      # over loopback instead of the host-mapped port.
+      ENV_URL: http://localhost:8000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped

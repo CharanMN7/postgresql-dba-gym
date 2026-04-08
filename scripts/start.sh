@@ -49,4 +49,4 @@ trap '"$PG_BIN/pg_ctl" -D "$PGDATA" -m fast stop || true' EXIT TERM INT
 export DBA_GYM_DSN="postgresql://dba:dba@127.0.0.1:5432/dba_gym"
 
 echo "[start.sh] starting uvicorn on 0.0.0.0:8000"
-exec uvicorn app.server:app --host 0.0.0.0 --port 8000 --workers 1
+exec uvicorn server.app:app --host 0.0.0.0 --port 8000 --workers 1

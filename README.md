@@ -60,7 +60,7 @@ Single Docker container based on `python:3.11-slim`:
 ```
 ┌──────────────────────────── container ────────────────────────────┐
 │  PostgreSQL 16 (apt.postgresql.org)        FastAPI on uvicorn      │
-│        listening on 127.0.0.1:5432  ◄─────  app.server:app         │
+│        listening on 127.0.0.1:5432  ◄─────  server.app:app         │
 │                                              │                     │
 │                                              ▼                     │
 │           ┌─── PostgresDBAEnvironment (singleton) ───┐             │
@@ -82,18 +82,22 @@ idle-blocker thread).
 ### Key files
 
 ```
-app/environment.py      Pydantic Action/Observation/State + PostgresDBAEnvironment
-app/server.py           create_app(...) wiring + /tasks and /grade extras
-app/db.py               Connection pool factory and psql meta-command translator
-app/tasks/base.py       BaseTask ABC + GradingResult dataclass
-app/tasks/index_optimization.py     Task 1 grader
-app/tasks/schema_migration.py       Task 2 grader
-app/tasks/performance_diagnosis.py  Task 3 grader (with idle-blocker thread)
-sql/seed_*.sql          Deterministic per-task seeds
-inference.py            Hackathon judge harness (OpenAI-compatible client)
-scripts/start.sh        Container entrypoint: pg_ctl start → bootstrap → uvicorn
-Dockerfile              python:3.11-slim + Postgres 16, runs as UID 1000
-openenv.yaml            OpenEnv spec
+models.py                             Pydantic DBAAction / DBAObservation / DBAState
+client.py                             Typed EnvClient subclass (optional)
+pyproject.toml                        Project metadata + dependencies (uv-compatible)
+openenv.yaml                          Minimal OpenEnv spec (6 keys)
+server/app.py                         create_app(...) wiring + /tasks and /grade extras
+server/postgres_dba_gym_environment.py  PostgresDBAEnvironment class
+server/db.py                          Connection pool + psql meta-command translator
+server/tasks/base.py                  BaseTask ABC + GradingResult
+server/tasks/index_optimization.py    Task 1 grader
+server/tasks/schema_migration.py      Task 2 grader
+server/tasks/performance_diagnosis.py Task 3 grader (with idle-blocker thread)
+server/Dockerfile                     python:3.11-slim + Postgres 16, runs as UID 1000
+sql/seed_*.sql                        Deterministic per-task seeds
+scripts/start.sh                      Container entrypoint: pg_ctl → bootstrap → uvicorn
+inference.py                          Hackathon judge harness (OpenAI-compatible)
+demo.py                               Hand-crafted scripted demo (no LLM)
 ```
 
 ## HTTP API
@@ -117,63 +121,163 @@ Plus two convenience routes:
 | `GET` | `/tasks` | List all registered tasks with descriptors. |
 | `GET` | `/grade/{task_id}` | Re-run the active task's grader on demand. |
 
-## Quickstart
+## How to run
 
-### Local Docker
+### Prerequisites
+
+- **Docker** — required for the recommended path and for Hugging Face Space parity.
+- **Python 3.11+** — required for local development outside Docker.
+- **[`uv`](https://docs.astral.sh/uv/)** (recommended) or `pip` — for dependency management.
+- **OpenAI API key** — only required for running the baseline agent (`inference.py`).
+  The hackathon spec re-uses the env var `HF_TOKEN` to carry the OpenAI key.
+
+### Local development (Docker Compose — recommended)
+
+No Postgres or Python needed on the host. Everything — server, demo,
+inference, smoke tests — runs inside the container. Env vars are
+loaded from `.env` by `docker compose`, nothing is baked into the image.
 
 ```bash
-docker build -t pg-dba-gym .
-docker run --rm -p 8000:8000 pg-dba-gym
+# 1. Configure
+cp .env.example .env
+# edit .env: set HF_TOKEN to your OpenAI API key
 
-# In another shell:
-curl -s http://localhost:8000/health
-curl -s http://localhost:8000/tasks | jq
-curl -s -X POST http://localhost:8000/reset \
-     -H 'Content-Type: application/json' \
-     -d '{"task":"easy"}' | jq
-curl -s -X POST http://localhost:8000/step \
-     -H 'Content-Type: application/json' \
-     -d '{"action":{"sql":"CREATE INDEX ix1 ON task_schema.orders(customer_id, status, order_date);","done":false}}' | jq
+# 2. Build & start
+make build
+make up
+
+# 3. Verify
+make smoke         # curl-based health check
+make logs          # follow server logs
+
+# 4. Run things
+make demo          # hand-crafted winning solution, no LLM
+make inference     # baseline OpenAI agent on all 3 tasks
+make shell         # drop into the container
+
+# 5. Tear down
+make down
 ```
 
-### Running the baseline agent (`inference.py`)
+Run `make help` for the full target list (build, up, down, restart,
+logs, shell, demo, inference, smoke, validate, clean).
 
-The hackathon harness expects an OpenAI-compatible chat completions
-endpoint. Set three env vars and point at a running instance of the
-gym:
+### Advanced: raw `docker build` / `docker run`
+
+If you don't want Compose, you can drive the same image directly. This
+is the exact path Hugging Face Spaces uses.
 
 ```bash
-export API_BASE_URL=https://router.huggingface.co/v1
-export MODEL_NAME=meta-llama/Llama-3.1-70B-Instruct
-export HF_TOKEN=hf_xxx
-export ENV_URL=http://localhost:8000   # optional, defaults to this
+# Build the image (repo root is the build context)
+docker build -f server/Dockerfile -t pg-dba-gym .
 
+# Run it
+docker run --rm -p 8000:8000 --env-file .env pg-dba-gym
+```
+
+The container bundles PostgreSQL 16 and runs as UID 1000. First-time
+boot takes 3-5 seconds while `start.sh` brings up Postgres and
+bootstraps the `dba_gym` database.
+
+### Running the baseline agent
+
+`inference.py` drives the environment with an OpenAI-compatible LLM
+and emits a structured log block per task that matches the hackathon
+judge's parser.
+
+```bash
+# 1. Copy the env template and fill it in
+cp .env.example .env
+# edit .env to set HF_TOKEN=sk-...   (your OpenAI API key)
+
+# 2. Export the required variables
+export $(grep -v '^#' .env | xargs)
+export ENV_URL=http://localhost:8000
+
+# 3. Run against a server you've already started
 python inference.py
 ```
 
-Output is the exact judge format — one block per task plus an aggregate
-line at the end:
+Required environment variables:
+
+| Variable        | Example                        | Purpose                                  |
+|-----------------|--------------------------------|------------------------------------------|
+| `HF_TOKEN`      | `sk-...`                       | OpenAI API key (name mandated by hackathon spec) |
+| `MODEL_NAME`    | `gpt-4o-mini`                  | LLM identifier                           |
+| `API_BASE_URL`  | `https://api.openai.com/v1`    | OpenAI-compatible base URL               |
+| `ENV_URL`       | `http://localhost:8000`        | Running environment server URL           |
+
+For the judge path, set `IMAGE_NAME=pg-dba-gym` instead of `ENV_URL` —
+`inference.py` will spin up a fresh container via
+`GenericEnvClient.from_docker_image(IMAGE_NAME)`.
+
+### Running the hand-crafted demo
+
+`demo.py` runs a scripted solution through the same environment with
+no LLM involved. Useful to sanity-check a fresh build.
+
+```bash
+export ENV_URL=http://localhost:8000
+python demo.py
+```
+
+### Deployment to Hugging Face Spaces
+
+Two supported paths:
+
+**(a) Official OpenEnv push (recommended):**
+
+Requires the `openenv` CLI on the host — install it once with
+`pipx install "openenv-core[core]"` (or `uv tool install "openenv-core[core]"`
+if you already use `uv`). `make validate` runs the same check inside
+the container if you'd rather not install anything on the host.
+
+```bash
+# Validate layout first
+openenv validate
+
+# Push to a Space (creates it if missing)
+openenv push --repo-id your-username/postgres-dba-gym
+```
+
+**(b) `huggingface-cli` fallback via `deploy.sh`:**
+
+```bash
+export HF_TOKEN=hf_...              # a Hugging Face write token
+export HF_SPACE=your-username/postgres-dba-gym
+./deploy.sh
+```
+
+Both paths upload the repo as a Docker-SDK Space; `scripts/start.sh`
+brings up Postgres and uvicorn on port 8000 inside the Space.
+
+Once deployed, run the baseline agent against it:
+
+```bash
+export API_BASE_URL=https://api.openai.com/v1
+export MODEL_NAME=gpt-4o-mini
+export HF_TOKEN=sk-...
+export ENV_URL=https://your-username-postgres-dba-gym.hf.space
+python inference.py
+```
+
+### Log output format
+
+`inference.py` emits a structured log block per task that matches the
+hackathon judge's parser exactly:
 
 ```
-[START]
-[STEP] action: SELECT * FROM pg_indexes WHERE tablename='orders' | observation: ... | reward: 0.1
-[STEP] action: CREATE INDEX ON orders (customer_id, status, order_date) | observation: OK (CREATE) | reward: 1.0
-[END] total_reward: 1.0
-[START]
-...
-[END] total_reward: 1.0
-[START]
-...
-[END] total_reward: 1.0
-FINAL REWARDS: {"easy": 1.0, "medium": 1.0, "hard": 1.0}
+[START] task=easy env=postgres_dba_gym model=gpt-4o-mini
+[STEP] step=1 action=SELECT version(); reward=0.00 done=false error=null
+[STEP] step=2 action=CREATE INDEX ... reward=1.00 done=true error=null
+[END] success=true steps=2 score=1.000 rewards=0.00,1.00
 ```
 
-### Running on Hugging Face Spaces
-
-1. Push this repo to a new Space (`sdk: docker`, `app_port: 8000`).
-2. The Space starts the gym automatically — `scripts/start.sh` brings
-   up Postgres, bootstraps the `dba_gym` database, and launches uvicorn.
-3. Point any OpenEnv-aware agent at `https://<your-space>.hf.space`.
+- `reward` and the entries in `rewards` are formatted to 2 decimals.
+- `score` is formatted to 3 decimals.
+- `done` and `success` are lowercase `true`/`false`.
+- `error` is either the flattened error string or the literal `null`.
+- `[END]` is always emitted, even if the episode throws mid-run.
 
 ## Determinism
 
@@ -219,6 +323,35 @@ The `SUCCESS_THRESHOLD` (default `0.85`) defines when the env auto-flips
 - `step()` never raises — psycopg2 errors are captured and returned in
   the observation's `error` field, so the agent learns to fix typos
   rather than crash the server.
+
+## Baseline scores
+
+Both runs used `inference.py` with temperature 0.2 and default
+`max_steps = 25`. Scores are per-task reward in `[0, 1]` at
+episode end.
+
+| Model         | easy | medium | hard   | aggregate |
+|---------------|-----:|-------:|-------:|----------:|
+| `gpt-4o`      | 1.00 | 0.865  | 1.000  | 2.865 / 3.0 |
+| `gpt-4o-mini` | 1.00 | 1.000  | 0.9167 | 2.917 / 3.0 |
+
+Notes:
+
+- `gpt-4o-mini` outperformed `gpt-4o` on aggregate. The margin came
+  entirely from the medium task, where `gpt-4o` picked `DATE` for the
+  `order_date` column (truncating the time component) while `gpt-4o-mini`
+  picked `TIMESTAMP`. The grader's spot-check compares against the
+  original timestamps, so lossy type choices are penalized.
+- `gpt-4o-mini` lost 0.0833 on the hard task because it crossed the
+  0.85 auto-`done` threshold mid-fix (after setting 2 of 3 GUCs) and
+  the env terminated the episode before it could apply
+  `effective_cache_size`.
+- Both runs validated: deterministic seeds, `sqlparse`-based
+  multi-statement execution, error-as-observation recovery, and
+  grading sub-rubric visibility via `grading_breakdown`.
+
+Per-run annotated traces are in `notes/first-inference-run.md` and
+`notes/second-inference-run.md`.
 
 ## Requirements
 

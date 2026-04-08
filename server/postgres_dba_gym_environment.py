@@ -38,85 +38,68 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 import psycopg2
 import sqlparse
 from openenv.core.env_server.interfaces import Environment
-from openenv.core.env_server.types import Action, Observation, State
-from pydantic import ConfigDict, Field
 
-from app.db import (
-    borrow_connection,
-    create_pool,
-    is_meta_command,
-    translate_meta_command,
-)
+try:
+    from ..models import DBAAction, DBAObservation, DBAState
+    from .db import (
+        borrow_connection,
+        create_pool,
+        is_meta_command,
+        translate_meta_command,
+    )
+except ImportError:  # pragma: no cover - fallback for flat imports
+    from models import DBAAction, DBAObservation, DBAState
+    from server.db import (
+        borrow_connection,
+        create_pool,
+        is_meta_command,
+        translate_meta_command,
+    )
+
+import re as _re
+
+# ---------------------------------------------------------------------------
+# Destructive-action guard
+# ---------------------------------------------------------------------------
+#
+# Patterns we never want an agent to execute. Blocking at the env layer
+# (rather than inside each task's grader) means a runaway agent cannot
+# wipe the whole cluster between grading calls. The patterns are deliberately
+# narrow — schema_migration legitimately uses CREATE TABLE and can even DROP
+# TABLE IF EXISTS, so we only block:
+#   * DROP DATABASE ...
+#   * DROP SCHEMA task_schema (the fixture we ship)
+#   * DROP ROLE postgres / dba
+#   * TRUNCATE (nuking data)
+#   * Unqualified DELETE (no WHERE clause)
+#
+# When a guarded pattern matches, ``step()`` returns an error observation
+# with reward clamped to the last score. The episode is NOT terminated — the
+# agent gets a chance to recover.
+_DESTRUCTIVE_PATTERNS: List[_re.Pattern[str]] = [
+    _re.compile(r"\bDROP\s+DATABASE\b", _re.IGNORECASE),
+    _re.compile(r"\bDROP\s+SCHEMA\s+task_schema\b", _re.IGNORECASE),
+    _re.compile(r"\bDROP\s+ROLE\s+(?:postgres|dba)\b", _re.IGNORECASE),
+    _re.compile(r"\bTRUNCATE\b", _re.IGNORECASE),
+    # DELETE without a WHERE clause (greedy until ; or end-of-statement).
+    _re.compile(
+        r"\bDELETE\s+FROM\s+[\w.\"]+\s*(?:;|$)",
+        _re.IGNORECASE | _re.MULTILINE,
+    ),
+]
+
+
+def _destructive_match(sql: str) -> Optional[str]:
+    """Return the name of the first destructive pattern matching ``sql``."""
+    for pat in _DESTRUCTIVE_PATTERNS:
+        if pat.search(sql):
+            return pat.pattern
+    return None
 
 if TYPE_CHECKING:
-    from app.tasks.base import BaseTask
+    from server.tasks.base import BaseTask
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Pydantic models
-# ---------------------------------------------------------------------------
-
-
-class DBAAction(Action):
-    """Action emitted by an agent.
-
-    Attributes:
-        sql: SQL statement(s) or supported psql meta-command. Multiple
-            semicolon-separated statements are allowed in one action.
-        done: Optional self-declared completion flag. The environment
-            also auto-terminates when reward >= success_threshold or
-            step_count >= max_steps.
-    """
-
-    sql: str = Field(default="", description="SQL statement or psql meta-command")
-    done: bool = Field(
-        default=False, description="Set true to declare the task complete"
-    )
-
-
-class DBAObservation(Observation):
-    """Observation returned to the agent after every reset / step."""
-
-    output: str = Field(default="", description="Pretty-printed SQL output or error")
-    rows: Optional[List[Dict[str, Any]]] = Field(
-        default=None, description="Up to 100 result rows as dicts"
-    )
-    rowcount: Optional[int] = Field(default=None, description="cur.rowcount")
-    error: Optional[str] = Field(default=None, description="Postgres error string")
-    execution_ms: Optional[float] = Field(
-        default=None, description="Wall-clock execution time in ms"
-    )
-    task_description: Optional[str] = Field(
-        default=None, description="Long-form task prompt (only on /reset)"
-    )
-    task_id: Optional[str] = Field(
-        default=None, description="Active task id (easy / medium / hard)"
-    )
-    step_index: int = Field(default=0, description="1-indexed step counter")
-    max_steps: int = Field(default=0, description="Step budget for this task")
-    grading_breakdown: Optional[Dict[str, float]] = Field(
-        default=None, description="Sub-rubric scores from the grader"
-    )
-
-
-class DBAState(State):
-    """Per-episode environment state.
-
-    ``task_data`` is a free-form scratch space tasks use to cache
-    things like baseline timings or sample row hashes between
-    ``reset()`` and later ``grade()`` calls. The base ``State`` class
-    already contributes ``episode_id`` and ``step_count``.
-    """
-
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
-
-    task_name: Optional[str] = None
-    max_steps: int = 25
-    last_reward: float = 0.0
-    done: bool = False
-    task_data: Dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +124,10 @@ class PostgresDBAEnvironment(Environment[DBAAction, DBAObservation, DBAState]):
     def __init__(self) -> None:
         super().__init__()
         # Local import to avoid a circular dependency at module load time.
-        from app.tasks import build_task_registry
+        try:
+            from .tasks import build_task_registry
+        except ImportError:  # pragma: no cover
+            from server.tasks import build_task_registry
 
         self._pool = create_pool()
         self._tasks: Dict[str, "BaseTask"] = build_task_registry()
@@ -225,6 +211,27 @@ class PostgresDBAEnvironment(Environment[DBAAction, DBAObservation, DBAState]):
                 max_steps=self._state.max_steps,
                 done=True,
                 reward=0.0,
+            )
+
+        # Destructive-action guard: refuse obviously dangerous SQL without
+        # terminating the episode. Agent is expected to learn and retry.
+        guard_hit = _destructive_match(action.sql or "")
+        if guard_hit:
+            msg = (
+                f"destructive action blocked by safety guard "
+                f"(pattern={guard_hit!r}). Episode continues; retry with a "
+                "safer statement."
+            )
+            logger.warning("Blocked destructive action: %s", guard_hit)
+            return DBAObservation(
+                output=msg,
+                error="destructive_action_blocked",
+                task_id=self._state.task_name,
+                step_index=self._state.step_count,
+                max_steps=self._state.max_steps,
+                grading_breakdown=None,
+                done=False,
+                reward=self._state.last_reward,
             )
 
         rows, rowcount, ms, err = self._execute_sql(action.sql)
@@ -490,9 +497,4 @@ class PostgresDBAEnvironment(Environment[DBAAction, DBAObservation, DBAState]):
             )
 
 
-__all__ = [
-    "DBAAction",
-    "DBAObservation",
-    "DBAState",
-    "PostgresDBAEnvironment",
-]
+__all__ = ["PostgresDBAEnvironment"]
