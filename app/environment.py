@@ -48,6 +48,46 @@ from app.db import (
     translate_meta_command,
 )
 
+import re as _re
+
+# ---------------------------------------------------------------------------
+# Destructive-action guard
+# ---------------------------------------------------------------------------
+#
+# Patterns we never want an agent to execute. Blocking at the env layer
+# (rather than inside each task's grader) means a runaway agent cannot
+# wipe the whole cluster between grading calls. The patterns are deliberately
+# narrow — schema_migration legitimately uses CREATE TABLE and can even DROP
+# TABLE IF EXISTS, so we only block:
+#   * DROP DATABASE ...
+#   * DROP SCHEMA task_schema (the fixture we ship)
+#   * DROP ROLE postgres / dba
+#   * TRUNCATE (nuking data)
+#   * Unqualified DELETE (no WHERE clause)
+#
+# When a guarded pattern matches, ``step()`` returns an error observation
+# with reward clamped to the last score. The episode is NOT terminated — the
+# agent gets a chance to recover.
+_DESTRUCTIVE_PATTERNS: List[_re.Pattern[str]] = [
+    _re.compile(r"\bDROP\s+DATABASE\b", _re.IGNORECASE),
+    _re.compile(r"\bDROP\s+SCHEMA\s+task_schema\b", _re.IGNORECASE),
+    _re.compile(r"\bDROP\s+ROLE\s+(?:postgres|dba)\b", _re.IGNORECASE),
+    _re.compile(r"\bTRUNCATE\b", _re.IGNORECASE),
+    # DELETE without a WHERE clause (greedy until ; or end-of-statement).
+    _re.compile(
+        r"\bDELETE\s+FROM\s+[\w.\"]+\s*(?:;|$)",
+        _re.IGNORECASE | _re.MULTILINE,
+    ),
+]
+
+
+def _destructive_match(sql: str) -> Optional[str]:
+    """Return the name of the first destructive pattern matching ``sql``."""
+    for pat in _DESTRUCTIVE_PATTERNS:
+        if pat.search(sql):
+            return pat.pattern
+    return None
+
 if TYPE_CHECKING:
     from app.tasks.base import BaseTask
 
@@ -225,6 +265,27 @@ class PostgresDBAEnvironment(Environment[DBAAction, DBAObservation, DBAState]):
                 max_steps=self._state.max_steps,
                 done=True,
                 reward=0.0,
+            )
+
+        # Destructive-action guard: refuse obviously dangerous SQL without
+        # terminating the episode. Agent is expected to learn and retry.
+        guard_hit = _destructive_match(action.sql or "")
+        if guard_hit:
+            msg = (
+                f"destructive action blocked by safety guard "
+                f"(pattern={guard_hit!r}). Episode continues; retry with a "
+                "safer statement."
+            )
+            logger.warning("Blocked destructive action: %s", guard_hit)
+            return DBAObservation(
+                output=msg,
+                error="destructive_action_blocked",
+                task_id=self._state.task_name,
+                step_index=self._state.step_count,
+                max_steps=self._state.max_steps,
+                grading_breakdown=None,
+                done=False,
+                reward=self._state.last_reward,
             )
 
         rows, rowcount, ms, err = self._execute_sql(action.sql)
