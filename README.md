@@ -117,63 +117,99 @@ Plus two convenience routes:
 | `GET` | `/tasks` | List all registered tasks with descriptors. |
 | `GET` | `/grade/{task_id}` | Re-run the active task's grader on demand. |
 
-## Quickstart
+## How to run
 
-### Local Docker
+### Running locally
+
+**Prerequisites:** Docker installed.
+
+**Step 1 — Build and start the environment:**
 
 ```bash
 docker build -t pg-dba-gym .
 docker run --rm -p 8000:8000 pg-dba-gym
-
-# In another shell:
-curl -s http://localhost:8000/health
-curl -s http://localhost:8000/tasks | jq
-curl -s -X POST http://localhost:8000/reset \
-     -H 'Content-Type: application/json' \
-     -d '{"task":"easy"}' | jq
-curl -s -X POST http://localhost:8000/step \
-     -H 'Content-Type: application/json' \
-     -d '{"action":{"sql":"CREATE INDEX ix1 ON task_schema.orders(customer_id, status, order_date);","done":false}}' | jq
 ```
 
-### Running the baseline agent (`inference.py`)
+**Step 2 — Verify the environment is running:**
 
-The hackathon harness expects an OpenAI-compatible chat completions
-endpoint. Set three env vars and point at a running instance of the
-gym:
+```bash
+# List available tasks
+curl -s http://localhost:8000/tasks | jq
+
+# Reset to a task
+curl -s -X POST http://localhost:8000/reset \
+  -H 'Content-Type: application/json' \
+  -d '{"task":"easy"}' | jq
+
+# Send a SQL action
+curl -s -X POST http://localhost:8000/step \
+  -H 'Content-Type: application/json' \
+  -d '{"action":{"sql":"SELECT version();","done":false}}' | jq
+```
+
+**Step 3 — Run the baseline agent:**
+
+`inference.py` needs an OpenAI-compatible chat completions endpoint.
+Use either the Hugging Face Inference Router (matches the hackathon
+evaluation path) or OpenAI directly.
+
+*Option A — Hugging Face (matches hackathon evaluation):*
 
 ```bash
 export API_BASE_URL=https://router.huggingface.co/v1
-export MODEL_NAME=meta-llama/Llama-3.1-70B-Instruct
-export HF_TOKEN=hf_xxx
-export ENV_URL=http://localhost:8000   # optional, defaults to this
-
+export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
+export HF_TOKEN=hf_...   # huggingface.co/settings/tokens, needs Inference API permission
+export ENV_URL=http://localhost:8000
 python inference.py
 ```
 
-Output is the exact judge format — one block per task plus an aggregate
-line at the end:
+*Option B — OpenAI:*
 
-```
-[START]
-[STEP] action: SELECT * FROM pg_indexes WHERE tablename='orders' | observation: ... | reward: 0.1
-[STEP] action: CREATE INDEX ON orders (customer_id, status, order_date) | observation: OK (CREATE) | reward: 1.0
-[END] total_reward: 1.0
-[START]
-...
-[END] total_reward: 1.0
-[START]
-...
-[END] total_reward: 1.0
-FINAL REWARDS: {"easy": 1.0, "medium": 1.0, "hard": 1.0}
+```bash
+export API_BASE_URL=https://api.openai.com/v1
+export MODEL_NAME=gpt-4o-mini
+export HF_TOKEN=sk-...   # your OpenAI API key — env var name is mandated by the hackathon spec
+export ENV_URL=http://localhost:8000
+python inference.py
 ```
 
-### Running on Hugging Face Spaces
+The judge path additionally sets `IMAGE_NAME=pg-dba-gym`, in which case
+`inference.py` spins up a fresh container via
+`GenericEnvClient.from_docker_image(IMAGE_NAME)` instead of talking to
+a pre-running server.
 
-1. Push this repo to a new Space (`sdk: docker`, `app_port: 8000`).
-2. The Space starts the gym automatically — `scripts/start.sh` brings
-   up Postgres, bootstraps the `dba_gym` database, and launches uvicorn.
-3. Point any OpenEnv-aware agent at `https://<your-space>.hf.space`.
+### Running against a deployed Hugging Face Space
+
+Once this repo is pushed to an HF Space (`sdk: docker`, `app_port: 8000`),
+`scripts/start.sh` brings up Postgres, bootstraps the `dba_gym` database,
+and launches uvicorn on port 8000. To run the baseline agent against
+the deployed Space:
+
+```bash
+export API_BASE_URL=https://router.huggingface.co/v1
+export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
+export HF_TOKEN=hf_...
+export ENV_URL=https://your-username-pg-dba-gym.hf.space
+python inference.py
+```
+
+### Log output format
+
+`inference.py` emits a structured log block per task that matches the
+hackathon judge's parser exactly:
+
+```
+[START] task=easy env=postgres_dba_gym model=Qwen/Qwen2.5-72B-Instruct
+[STEP] step=1 action=SELECT version(); reward=0.00 done=false error=null
+[STEP] step=2 action=CREATE INDEX ... reward=1.00 done=true error=null
+[END] success=true steps=2 score=1.000 rewards=0.00,1.00
+```
+
+- `reward` and the entries in `rewards` are formatted to 2 decimals.
+- `score` is formatted to 3 decimals.
+- `done` and `success` are lowercase `true`/`false`.
+- `error` is either the flattened error string or the literal `null`.
+- `[END]` is always emitted, even if the episode throws mid-run.
 
 ## Determinism
 
