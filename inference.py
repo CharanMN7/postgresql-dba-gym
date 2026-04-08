@@ -7,13 +7,13 @@ a pre-running server at ``ENV_URL`` (the local-dev path).
 
 Environment variables
 ---------------------
-``HF_TOKEN`` / ``API_KEY``   — bearer token passed to the OpenAI SDK client.
-``API_BASE_URL``             — OpenAI-compatible endpoint (default: HF router).
-``MODEL_NAME``               — model id passed to ``chat.completions.create``.
-``IMAGE_NAME``               — if set, ``GenericEnvClient.from_docker_image`` is
-                               used to spin up a fresh container for the run.
-``ENV_URL``                  — fallback base URL when ``IMAGE_NAME`` is unset
-                               (default: ``http://localhost:8000``).
+``HF_TOKEN``      — OpenAI API key (the hackathon-mandated variable name).
+``API_BASE_URL``  — OpenAI API base URL (default: ``https://api.openai.com/v1``).
+``MODEL_NAME``    — OpenAI model id (default: ``gpt-4o-mini``).
+``IMAGE_NAME``    — if set, ``GenericEnvClient.from_docker_image`` is used to
+                    spin up a fresh container for the run.
+``ENV_URL``       — fallback base URL when ``IMAGE_NAME`` is unset
+                    (default: ``http://localhost:8000``).
 
 Output format (one block per task)
 ----------------------------------
@@ -51,9 +51,9 @@ TASK_ORDER: List[str] = ["easy", "medium", "hard"]
 DEFAULT_MAX_STEPS = 25
 SUCCESS_THRESHOLD = 0.85
 
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
+API_KEY = os.getenv("HF_TOKEN")
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.openai.com/v1"
+MODEL_NAME = os.getenv("MODEL_NAME") or "gpt-4o-mini"
 IMAGE_NAME = os.getenv("IMAGE_NAME")
 ENV_URL = os.getenv("ENV_URL", "http://localhost:8000").rstrip("/")
 
@@ -289,11 +289,12 @@ async def _open_env() -> GenericEnvClient:
 
 async def main() -> int:
     if not API_KEY:
-        print(
-            "ERROR: missing HF_TOKEN / API_KEY environment variable",
-            file=sys.stderr,
+        raise ValueError(
+            "HF_TOKEN environment variable is required. "
+            "Set it to your OpenAI API key — the hackathon spec mandates the "
+            "variable name `HF_TOKEN` and it is passed as the OpenAI client "
+            "`api_key`."
         )
-        return 2
 
     llm = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
     env: Optional[GenericEnvClient] = None
