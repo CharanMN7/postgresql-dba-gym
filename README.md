@@ -220,6 +220,35 @@ The `SUCCESS_THRESHOLD` (default `0.85`) defines when the env auto-flips
   the observation's `error` field, so the agent learns to fix typos
   rather than crash the server.
 
+## Baseline scores
+
+Both runs used `inference.py` with temperature 0.2 and default
+`max_steps = 25`. Scores are per-task reward in `[0, 1]` at
+episode end.
+
+| Model         | easy | medium | hard   | aggregate |
+|---------------|-----:|-------:|-------:|----------:|
+| `gpt-4o`      | 1.00 | 0.865  | 1.000  | 2.865 / 3.0 |
+| `gpt-4o-mini` | 1.00 | 1.000  | 0.9167 | 2.917 / 3.0 |
+
+Notes:
+
+- `gpt-4o-mini` outperformed `gpt-4o` on aggregate. The margin came
+  entirely from the medium task, where `gpt-4o` picked `DATE` for the
+  `order_date` column (truncating the time component) while `gpt-4o-mini`
+  picked `TIMESTAMP`. The grader's spot-check compares against the
+  original timestamps, so lossy type choices are penalized.
+- `gpt-4o-mini` lost 0.0833 on the hard task because it crossed the
+  0.85 auto-`done` threshold mid-fix (after setting 2 of 3 GUCs) and
+  the env terminated the episode before it could apply
+  `effective_cache_size`.
+- Both runs validated: deterministic seeds, `sqlparse`-based
+  multi-statement execution, error-as-observation recovery, and
+  grading sub-rubric visibility via `grading_breakdown`.
+
+Per-run annotated traces are in `notes/first-inference-run.md` and
+`notes/second-inference-run.md`.
+
 ## Requirements
 
 ```
