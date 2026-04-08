@@ -1,0 +1,26 @@
+"""Task registry for the PostgreSQL DBA Gym."""
+
+from __future__ import annotations
+
+from typing import Dict
+
+from app.tasks.base import BaseTask
+from app.tasks.index_optimization import IndexOptimizationTask
+from app.tasks.performance_diagnosis import PerformanceDiagnosisTask
+from app.tasks.schema_migration import SchemaMigrationTask
+
+
+def build_task_registry() -> Dict[str, BaseTask]:
+    """Return a fresh dict of {task_id: task_instance}.
+
+    Tasks are kept as singletons within a server process — the env
+    instance owns one of each and re-uses them across episodes.
+    """
+    return {
+        "easy": IndexOptimizationTask(),
+        "medium": SchemaMigrationTask(),
+        "hard": PerformanceDiagnosisTask(),
+    }
+
+
+__all__ = ["BaseTask", "build_task_registry"]
