@@ -227,6 +227,11 @@ Two supported paths:
 
 **(a) Official OpenEnv push (recommended):**
 
+Requires the `openenv` CLI on the host — install it once with
+`pipx install "openenv-core[core]"` (or `uv tool install "openenv-core[core]"`
+if you already use `uv`). `make validate` runs the same check inside
+the container if you'd rather not install anything on the host.
+
 ```bash
 # Validate layout first
 openenv validate

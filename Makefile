@@ -55,8 +55,8 @@ inference: ## Run the OpenAI baseline agent inside the container
 smoke: ## Run host-side curl smoke test against localhost:8000
 	@HOST_URL=$(HOST_URL) bash scripts/smoke_test.sh
 
-validate: ## Run `openenv validate` on the host
-	openenv validate
+validate: ## Run `openenv validate` inside the container
+	$(COMPOSE) exec $(SERVICE) openenv validate
 
 clean: ## Stop, remove volumes, and prune dangling images
 	$(COMPOSE) down -v
