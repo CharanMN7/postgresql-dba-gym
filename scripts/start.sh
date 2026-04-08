@@ -25,17 +25,21 @@ for i in {1..30}; do
     fi
 done
 
+# Bootstrap via Unix socket (-h /tmp matches unix_socket_directories). initdb
+# uses --auth-local=trust and --auth-host=md5; TCP to 127.0.0.1 would require a
+# postgres password we never set.
+PGSOCK=/tmp
 echo "[start.sh] bootstrapping dba_gym database and dba role (idempotent)"
-"$PG_BIN/psql" -h 127.0.0.1 -U postgres -tc \
+"$PG_BIN/psql" -h "$PGSOCK" -U postgres -tc \
     "SELECT 1 FROM pg_database WHERE datname='dba_gym'" | grep -q 1 \
-    || "$PG_BIN/psql" -h 127.0.0.1 -U postgres -c "CREATE DATABASE dba_gym;"
+    || "$PG_BIN/psql" -h "$PGSOCK" -U postgres -c "CREATE DATABASE dba_gym;"
 
-"$PG_BIN/psql" -h 127.0.0.1 -U postgres -tc \
+"$PG_BIN/psql" -h "$PGSOCK" -U postgres -tc \
     "SELECT 1 FROM pg_roles WHERE rolname='dba'" | grep -q 1 \
-    || "$PG_BIN/psql" -h 127.0.0.1 -U postgres -c \
+    || "$PG_BIN/psql" -h "$PGSOCK" -U postgres -c \
        "CREATE ROLE dba LOGIN PASSWORD 'dba' SUPERUSER;"
 
-"$PG_BIN/psql" -h 127.0.0.1 -U postgres -c \
+"$PG_BIN/psql" -h "$PGSOCK" -U postgres -c \
     "GRANT ALL ON DATABASE dba_gym TO dba;"
 
 # Stop postgres cleanly when the container is asked to exit so the data
