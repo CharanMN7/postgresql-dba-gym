@@ -1,40 +1,61 @@
-"""Baseline LLM agent for the PostgreSQL DBA Gym (hackathon judge harness).
+"""Baseline LLM agent for the PostgreSQL DBA Gym (OpenEnv hackathon harness).
 
-The hackathon judge runs this script with the following environment variables:
+Runs three DBA tasks (easy / medium / hard) end-to-end against an
+OpenEnv-compliant server — either a fresh Docker container spun up via
+``GenericEnvClient.from_docker_image(IMAGE_NAME)`` (the evaluator path) or
+a pre-running server at ``ENV_URL`` (the local-dev path).
 
-* ``API_BASE_URL`` — OpenAI-compatible chat completions endpoint
-* ``MODEL_NAME``   — model id to pass to ``client.chat.completions.create``
-* ``HF_TOKEN``     — bearer token (used as the OpenAI ``api_key``)
+Environment variables
+---------------------
+``HF_TOKEN`` / ``API_KEY``   — bearer token passed to the OpenAI SDK client.
+``API_BASE_URL``             — OpenAI-compatible endpoint (default: HF router).
+``MODEL_NAME``               — model id passed to ``chat.completions.create``.
+``IMAGE_NAME``               — if set, ``GenericEnvClient.from_docker_image`` is
+                               used to spin up a fresh container for the run.
+``ENV_URL``                  — fallback base URL when ``IMAGE_NAME`` is unset
+                               (default: ``http://localhost:8000``).
 
-It also assumes a running ``postgres_dba_gym`` env at ``ENV_URL``
-(defaults to ``http://localhost:8000``).
+Output format (one block per task)
+----------------------------------
+[START] task=<task_name> env=<benchmark> model=<model_name>
+[STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+...
+[END] success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
 
-Output format
--------------
-Per-task block, in this exact form (deviation = disqualification):
-
-    [START]
-    [STEP] action: <action> | observation: <obs> | reward: <reward>
-    [STEP] action: <action> | observation: <obs> | reward: <reward>
-    ...
-    [END] total_reward: <reward>
-
-After all three tasks finish, an aggregate ``FINAL REWARDS:`` JSON line is
-printed. The aggregate is supplemental and does not break the per-task
-contract — judges grep for the per-task ``[START]/[STEP]/[END]`` blocks.
+- ``reward`` / ``rewards`` are formatted to 2 decimal places.
+- ``score`` is formatted to 3 decimal places.
+- ``done`` / ``success`` are lowercase ``true``/``false``.
+- ``error`` is either the flattened error string or the literal ``null``.
+- ``[END]`` is ALWAYS emitted, even if the episode throws.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 import sys
-import time
 from typing import Any, Dict, List, Optional
 
-import requests
 from openai import OpenAI
+from openenv.core.generic_client import GenericEnvClient
+
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+ENV_NAME = "postgres_dba_gym"
+TASK_ORDER: List[str] = ["easy", "medium", "hard"]
+DEFAULT_MAX_STEPS = 25
+SUCCESS_THRESHOLD = 0.85
+
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
+MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
+IMAGE_NAME = os.getenv("IMAGE_NAME")
+ENV_URL = os.getenv("ENV_URL", "http://localhost:8000").rstrip("/")
 
 
 SYSTEM_PROMPT = """You are an expert PostgreSQL Database Administrator working in a sandboxed
@@ -61,53 +82,71 @@ Be decisive. Read the grading_breakdown after every step and target whichever
 sub-rubric is still 0. Stop when reward >= success threshold.
 """
 
-# Tasks are run in this order. Names match the env's task ids.
-TASK_ORDER: List[str] = ["easy", "medium", "hard"]
-
-# Per-task max_steps cap on the agent loop. The env enforces its own
-# MAX_STEPS as well; whichever fires first ends the episode.
-DEFAULT_MAX_STEPS = 25
-
 
 # ---------------------------------------------------------------------------
-# HTTP helpers
+# Log helpers — the EXACT format the judge parses.
 # ---------------------------------------------------------------------------
 
 
-def _post_json(url: str, payload: Dict[str, Any], timeout: float = 120.0) -> Dict[str, Any]:
-    """POST JSON and raise on non-2xx. Bubbles up the body on errors."""
-    r = requests.post(url, json=payload, timeout=timeout)
-    if not r.ok:
-        raise RuntimeError(f"POST {url} -> {r.status_code}: {r.text[:500]}")
-    return r.json()
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
-def _get_json(url: str, timeout: float = 30.0) -> Dict[str, Any]:
-    r = requests.get(url, timeout=timeout)
-    if not r.ok:
-        raise RuntimeError(f"GET {url} -> {r.status_code}: {r.text[:500]}")
-    return r.json()
+def log_step(
+    step: int,
+    action: str,
+    reward: float,
+    done: bool,
+    error: Optional[str],
+) -> None:
+    error_val = _flatten(error, max_len=200) if error else "null"
+    done_val = "true" if done else "false"
+    action_str = _flatten(action, max_len=200)
+    print(
+        f"[STEP] step={step} action={action_str} "
+        f"reward={reward:.2f} done={done_val} error={error_val}",
+        flush=True,
+    )
+
+
+def log_end(
+    success: bool,
+    steps: int,
+    score: float,
+    rewards: List[float],
+) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    success_val = "true" if success else "false"
+    print(
+        f"[END] success={success_val} steps={steps} "
+        f"score={score:.3f} rewards={rewards_str}",
+        flush=True,
+    )
 
 
 # ---------------------------------------------------------------------------
-# LLM action parsing
+# Helpers
 # ---------------------------------------------------------------------------
+
+
+def _flatten(value: Any, max_len: int = 200) -> str:
+    """Collapse a value to a single trimmed line (no newlines, no tabs)."""
+    if value is None:
+        return ""
+    s = str(value).replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    if len(s) > max_len:
+        s = s[: max_len - 3] + "..."
+    return s
 
 
 _FENCE_RE = re.compile(r"```(?:json|sql)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
 
 
 def parse_action(content: str) -> Dict[str, Any]:
-    """Coerce arbitrary LLM output into a ``{"sql": ..., "done": ...}`` dict.
-
-    Strategy:
-      1. Try to ``json.loads`` the entire content.
-      2. Try to extract a fenced ``json``/``sql`` code block and parse that.
-      3. Fall back to using the raw content as a SQL string with done=False.
-    """
+    """Coerce arbitrary LLM output into ``{"sql": ..., "done": ...}``."""
     if content is None:
         return {"sql": "", "done": False}
-
     text = content.strip()
 
     # Strategy 1: whole content is JSON.
@@ -119,15 +158,13 @@ def parse_action(content: str) -> Dict[str, Any]:
         pass
 
     # Strategy 2: fenced code block.
-    fences = _FENCE_RE.findall(text)
-    for block in fences:
+    for block in _FENCE_RE.findall(text):
         block = block.strip()
         try:
             obj = json.loads(block)
             if isinstance(obj, dict) and "sql" in obj:
                 return {"sql": str(obj["sql"]), "done": bool(obj.get("done", False))}
         except json.JSONDecodeError:
-            # Treat the fenced block as raw SQL.
             return {"sql": block, "done": False}
 
     # Strategy 3: raw content as SQL.
@@ -135,138 +172,105 @@ def parse_action(content: str) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Single-line formatters for the [STEP] log line
-# ---------------------------------------------------------------------------
-
-
-def _flatten(value: Any, max_len: int = 200) -> str:
-    """Collapse a value into a single trimmed line for the log format."""
-    if value is None:
-        return ""
-    s = str(value)
-    s = s.replace("\n", " ").replace("\r", " ").replace("\t", " ")
-    s = re.sub(r"\s+", " ", s).strip()
-    if len(s) > max_len:
-        s = s[: max_len - 3] + "..."
-    return s
-
-
-def _build_observation_text(obs: Dict[str, Any]) -> str:
-    """Pick the most informative observation field for the [STEP] line."""
-    error = obs.get("error")
-    output = obs.get("output")
-    if error:
-        return f"ERROR: {error}"
-    return output or ""
-
-
-# ---------------------------------------------------------------------------
 # Per-task agent loop
 # ---------------------------------------------------------------------------
 
 
-def run_task(
-    env_url: str,
+async def run_task(
+    env: GenericEnvClient,
     task_name: str,
-    client: OpenAI,
+    llm: OpenAI,
     model: str,
     max_steps: int = DEFAULT_MAX_STEPS,
 ) -> float:
-    """Run one task end-to-end and emit the judge's exact log block.
+    """Run one task end-to-end and emit the judge's exact [START]/[STEP]/[END]."""
+    log_start(task_name, ENV_NAME, model)
 
-    Returns the final reward observed for this task.
-    """
-    print("[START]", flush=True)
+    per_step_rewards: List[float] = []
+    score: float = 0.0
+    steps_taken: int = 0
+    history: List[Dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    done: bool = False
 
-    reset_resp = _post_json(f"{env_url}/reset", {"task": task_name})
-    obs = reset_resp.get("observation", {}) or {}
-    task_description = obs.get("task_description") or obs.get("output", "")
+    try:
+        # Reset with the task kwarg — flows through ResetRequest extra="allow".
+        result = await env.reset(task=task_name)
+        obs: Dict[str, Any] = result.observation or {}
+        task_description = obs.get("task_description") or obs.get("output", "")
+        history.append({"role": "user", "content": task_description})
+        score = float(result.reward or 0.0)
+        done = bool(result.done)
+        env_max = int(obs.get("max_steps") or max_steps)
+        step_budget = min(max_steps, env_max)
 
-    history: List[Dict[str, str]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": task_description},
-    ]
+        for n in range(1, step_budget + 1):
+            if done:
+                break
 
-    total_reward: float = float(reset_resp.get("reward") or 0.0)
-    done = bool(reset_resp.get("done"))
+            # --- ask the model for the next action ---------------------------
+            try:
+                chat = llm.chat.completions.create(
+                    model=model,
+                    messages=history,
+                    temperature=0.2,
+                    max_tokens=600,
+                )
+                content = chat.choices[0].message.content or ""
+            except Exception as exc:
+                msg = f"llm error: {exc}"
+                log_step(n, "", score, True, msg)
+                per_step_rewards.append(score)
+                steps_taken = n
+                done = True
+                break
 
-    # The env reports its own MAX_STEPS in the observation; honour the
-    # smaller of (env, agent) so the loop never runs longer than either.
-    env_max_steps = int(obs.get("max_steps") or max_steps)
-    step_budget = min(max_steps, env_max_steps)
+            action = parse_action(content)
+            action_sql = action.get("sql", "")
 
-    for _ in range(step_budget):
-        if done:
-            break
+            # --- step the environment ----------------------------------------
+            try:
+                result = await env.step(
+                    {"sql": action_sql, "done": bool(action.get("done"))}
+                )
+            except Exception as exc:
+                msg = f"env step error: {exc}"
+                log_step(n, action_sql, score, True, msg)
+                per_step_rewards.append(score)
+                steps_taken = n
+                done = True
+                break
 
-        # Ask the model for the next action.
-        try:
-            chat = client.chat.completions.create(
-                model=model,
-                messages=history,
-                temperature=0.2,
-                max_tokens=600,
+            obs = result.observation or {}
+            reward = float(result.reward or 0.0)
+            done = bool(result.done)
+            obs_err = obs.get("error")
+
+            log_step(n, action_sql, reward, done, obs_err)
+            per_step_rewards.append(reward)
+            steps_taken = n
+            score = reward
+
+            # --- feed a compact observation back to the model ---------------
+            history.append({"role": "assistant", "content": content})
+            feedback = {
+                "output": _flatten(obs.get("output", ""), max_len=600),
+                "error": obs_err,
+                "reward": reward,
+                "grading_breakdown": obs.get("grading_breakdown"),
+                "step_index": obs.get("step_index"),
+                "max_steps": obs.get("max_steps"),
+            }
+            history.append(
+                {"role": "user", "content": json.dumps(feedback, default=str)[:1500]}
             )
-            content = chat.choices[0].message.content or ""
-        except Exception as exc:
-            # Don't crash on a transient API hiccup — log and bail out
-            # of this task with the last reward intact.
-            print(
-                f"[STEP] action: <llm error: {_flatten(exc, 80)}> | "
-                f"observation: <skipped> | reward: {total_reward}",
-                flush=True,
-            )
-            break
+    except Exception as exc:  # noqa: BLE001
+        # Any uncaught error still has to produce a valid [END] line.
+        print(f"[DEBUG] run_task error: {exc}", flush=True)
+    finally:
+        success = score >= SUCCESS_THRESHOLD
+        log_end(success=success, steps=steps_taken, score=score, rewards=per_step_rewards)
 
-        action = parse_action(content)
-        action_str = _flatten(action.get("sql", ""), max_len=200)
-
-        try:
-            step_resp = _post_json(
-                f"{env_url}/step",
-                {"action": {"sql": action["sql"], "done": bool(action.get("done"))}},
-            )
-        except Exception as exc:
-            print(
-                f"[STEP] action: {action_str} | "
-                f"observation: <env error: {_flatten(exc, 120)}> | "
-                f"reward: {total_reward}",
-                flush=True,
-            )
-            break
-
-        obs = step_resp.get("observation", {}) or {}
-        reward = float(step_resp.get("reward") or 0.0)
-        done = bool(step_resp.get("done"))
-        obs_text = _flatten(_build_observation_text(obs), max_len=200)
-
-        print(
-            f"[STEP] action: {action_str} | "
-            f"observation: {obs_text} | "
-            f"reward: {reward}",
-            flush=True,
-        )
-
-        total_reward = reward
-
-        # Feed back a compact JSON snapshot to the model so it can
-        # reason about the grading_breakdown without us flooding the
-        # context with full result sets.
-        history.append({"role": "assistant", "content": content})
-        feedback = {
-            "output": _flatten(obs.get("output", ""), max_len=600),
-            "error": obs.get("error"),
-            "reward": reward,
-            "grading_breakdown": obs.get("grading_breakdown"),
-            "step_index": obs.get("step_index"),
-            "max_steps": obs.get("max_steps"),
-        }
-        history.append(
-            {"role": "user", "content": json.dumps(feedback, default=str)[:1500]}
-        )
-
-    print(f"[END] total_reward: {total_reward}", flush=True)
-    return total_reward
+    return score
 
 
 # ---------------------------------------------------------------------------
@@ -274,60 +278,44 @@ def run_task(
 # ---------------------------------------------------------------------------
 
 
-def _wait_for_env(env_url: str, timeout_s: float = 60.0) -> None:
-    """Poll ``/health`` until the env answers (or give up)."""
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        try:
-            r = requests.get(f"{env_url}/health", timeout=2.0)
-            if r.ok:
-                return
-        except requests.RequestException:
-            pass
-        time.sleep(1.0)
-    raise RuntimeError(f"environment at {env_url} did not become healthy in {timeout_s}s")
+async def _open_env() -> GenericEnvClient:
+    """Open an env client via Docker image (preferred) or live base URL."""
+    if IMAGE_NAME:
+        return await GenericEnvClient.from_docker_image(IMAGE_NAME)
+    env = GenericEnvClient(base_url=ENV_URL)
+    await env.connect()
+    return env
 
 
-def main() -> int:
-    api_base_url = os.environ.get("API_BASE_URL")
-    model = os.environ.get("MODEL_NAME")
-    hf_token = os.environ.get("HF_TOKEN")
-    env_url = os.environ.get("ENV_URL", "http://localhost:8000").rstrip("/")
-    max_steps = int(os.environ.get("DBA_GYM_MAX_STEPS", str(DEFAULT_MAX_STEPS)))
-
-    missing = [
-        name
-        for name, val in [
-            ("API_BASE_URL", api_base_url),
-            ("MODEL_NAME", model),
-            ("HF_TOKEN", hf_token),
-        ]
-        if not val
-    ]
-    if missing:
+async def main() -> int:
+    if not API_KEY:
         print(
-            f"ERROR: missing required environment variables: {', '.join(missing)}",
+            "ERROR: missing HF_TOKEN / API_KEY environment variable",
             file=sys.stderr,
         )
         return 2
 
-    client = OpenAI(base_url=api_base_url, api_key=hf_token)
-    _wait_for_env(env_url)
+    llm = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    env: Optional[GenericEnvClient] = None
+    try:
+        env = await _open_env()
+        for task_name in TASK_ORDER:
+            await run_task(
+                env=env,
+                task_name=task_name,
+                llm=llm,
+                model=MODEL_NAME,
+                max_steps=DEFAULT_MAX_STEPS,
+            )
+    finally:
+        if env is not None:
+            try:
+                await env.close()
+            except Exception as e:  # noqa: BLE001
+                print(f"[DEBUG] env.close() error: {e}", flush=True)
 
-    rewards: Dict[str, float] = {}
-    for task_name in TASK_ORDER:
-        rewards[task_name] = run_task(
-            env_url=env_url,
-            task_name=task_name,
-            client=client,
-            model=model,
-            max_steps=max_steps,
-        )
-
-    # Aggregate line for human readers / scoreboards.
-    print(f"FINAL REWARDS: {json.dumps(rewards)}", flush=True)
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(asyncio.run(main()))
