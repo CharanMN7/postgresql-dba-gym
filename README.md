@@ -19,7 +19,7 @@ tags:
 
 A live PostgreSQL 16 training environment for AI agents — built on
 [OpenEnv](https://github.com/meta-pytorch/openenv) and packaged for Hugging
-Face Spaces. Agents practice three real database administration tasks
+Face Spaces. Agents practice five real database administration tasks
 against a real Postgres instance running inside the same container, and
 every reward is computed deterministically by inspecting `pg_catalog`,
 `information_schema`, and `pg_stat_*`. There is **zero LLM-as-judge**.
@@ -39,8 +39,7 @@ looks like:
 Those are three of the five tasks in this environment. The other two
 cover disaster recovery (restoring from in-schema backup copies after a
 simulated data-loss incident) and a security audit (locking down
-misconfigured roles and public-schema ACLs), labelled `expert` and
-`master` respectively. All of them require the
+misconfigured roles and public-schema ACLs). All of them require the
 agent to *read database state*, decide what to do, *issue SQL*, and
 *verify the fix worked* — the full DBA loop, against ground truth, with
 zero rubric handwaving.
@@ -160,7 +159,7 @@ make logs          # follow server logs
 
 # 4. Run things
 make demo          # hand-crafted winning solution, no LLM
-make inference     # baseline OpenAI agent on all 3 tasks
+make inference     # baseline LLM agent on all 5 tasks
 make shell         # drop into the container
 
 # 5. Tear down
@@ -168,7 +167,8 @@ make down
 ```
 
 Run `make help` for the full target list (build, up, down, restart,
-logs, shell, demo, inference, smoke, validate, clean).
+logs, shell, demo, inference, smoke, validate, deploy, ping, submit,
+clean).
 
 ### Advanced: raw `docker build` / `docker run`
 
@@ -196,7 +196,7 @@ judge's parser.
 ```bash
 # 1. Copy the env template and fill it in
 cp .env.example .env
-# edit .env to set HF_TOKEN=sk-...   (your OpenAI API key)
+# edit .env: set HF_TOKEN to your OpenAI API key
 
 # 2. Export the required variables
 export $(grep -v '^#' .env | xargs)
@@ -208,16 +208,19 @@ python inference.py
 
 Required environment variables:
 
-| Variable       | Example                     | Purpose                                          |
-| -------------- | --------------------------- | ------------------------------------------------ |
-| `HF_TOKEN`     | `sk-...`                    | OpenAI API key (name mandated by hackathon spec) |
-| `MODEL_NAME`   | `gpt-4o-mini`               | LLM identifier                                   |
-| `API_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible base URL                       |
-| `ENV_URL`      | `http://localhost:8000`     | Running environment server URL                   |
+| Variable            | Example                              | Purpose                                                      |
+| ------------------- | ------------------------------------ | ------------------------------------------------------------ |
+| `HF_TOKEN`          | `sk-...`                             | OpenAI API key (name mandated by hackathon spec)             |
+| `MODEL_NAME`        | `gpt-4o-mini`                        | LLM identifier                                               |
+| `API_BASE_URL`      | `https://api.openai.com/v1`          | OpenAI-compatible base URL                                   |
+| `ENV_URL`           | `http://localhost:8000`              | Running environment server URL                               |
+| `IMAGE_NAME`        | `pg-dba-gym`                         | Docker image name (triggers `from_docker_image`; optional)   |
+| `LOCAL_IMAGE_NAME`  | `pg-dba-gym`                         | Alias for `IMAGE_NAME` (accepted by evaluator; optional)     |
 
-For the judge path, set `IMAGE_NAME=pg-dba-gym` instead of `ENV_URL` —
-`inference.py` will spin up a fresh container via
-`GenericEnvClient.from_docker_image(IMAGE_NAME)`.
+For the judge path, set `IMAGE_NAME=pg-dba-gym` (or `LOCAL_IMAGE_NAME`)
+instead of `ENV_URL` — `inference.py` will spin up a fresh container via
+`GenericEnvClient.from_docker_image(IMAGE_NAME)`. If Docker is unavailable,
+it falls back to connecting via `ENV_URL`.
 
 ### Running the hand-crafted demo
 
@@ -231,9 +234,22 @@ python demo.py
 
 ### Deployment to Hugging Face Spaces
 
-Two supported paths:
+**One-command deploy + submit (recommended):**
 
-**(a) Official OpenEnv push (recommended):**
+```bash
+make submit        # validate → git push → deploy to HF Space
+```
+
+Or run the steps individually:
+
+```bash
+make deploy        # validate + push to HF Space
+make ping          # check the Space is live (POST /reset → 200)
+```
+
+**Manual paths:**
+
+**(a) Official OpenEnv push:**
 
 Requires the `openenv` CLI on the host — install it once with
 `pipx install "openenv-core[core]"` (or `uv tool install "openenv-core[core]"`
@@ -241,18 +257,14 @@ if you already use `uv`). `make validate` runs the same check inside
 the container if you'd rather not install anything on the host.
 
 ```bash
-# Validate layout first
 openenv validate
-
-# Push to a Space (creates it if missing)
-openenv push --repo-id your-username/postgres-dba-gym
+openenv push --repo-id charanx/postgres_dba_gym
 ```
 
 **(b) `huggingface-cli` fallback via `deploy.sh`:**
 
 ```bash
-export HF_TOKEN=hf_...              # a Hugging Face write token
-export HF_SPACE=your-username/postgres-dba-gym
+export HF_TOKEN=hf_...
 ./deploy.sh
 ```
 
@@ -265,7 +277,7 @@ Once deployed, run the baseline agent against it:
 export API_BASE_URL=https://api.openai.com/v1
 export MODEL_NAME=gpt-4o-mini
 export HF_TOKEN=sk-...
-export ENV_URL=https://your-username-postgres-dba-gym.hf.space
+export ENV_URL=https://charanx-postgres-dba-gym.hf.space
 python inference.py
 ```
 
@@ -275,7 +287,7 @@ python inference.py
 hackathon judge's parser exactly:
 
 ```
-[START] task=easy env=postgres_dba_gym model=gpt-4o-mini
+[START] task=easy env=postgres_dba_gym model=Qwen/Qwen2.5-72B-Instruct
 [STEP] step=1 action=SELECT version(); reward=0.00 done=false error=null
 [STEP] step=2 action=CREATE INDEX ... reward=1.00 done=true error=null
 [END] success=true steps=2 score=1.000 rewards=0.00,1.00
@@ -334,32 +346,34 @@ The `SUCCESS_THRESHOLD` (default `0.85`) defines when the env auto-flips
 
 ## Baseline scores
 
-Both runs used `inference.py` with temperature 0.2 and default
+All runs used `inference.py` with temperature 0.2 and default
 `max_steps = 25`. Scores are per-task reward in `[0, 1]` at
 episode end.
 
-| Model         | easy | medium |   hard |   aggregate |
-| ------------- | ---: | -----: | -----: | ----------: |
-| `gpt-4o`      | 1.00 |  0.865 |  1.000 | 2.865 / 3.0 |
-| `gpt-4o-mini` | 1.00 |  1.000 | 0.9167 | 2.917 / 3.0 |
+| Run                    | easy |  medium |   hard | expert | master | aggregate       |
+| ---------------------- | ---: | ------: | -----: | -----: | -----: | --------------: |
+| Run 1 (`gpt-4o`)       | 1.00 |   0.865 |  1.000 |      — |      — | 2.865 / 3.0     |
+| Run 2 (`gpt-4o-mini`)  | 1.00 |   1.000 |  0.917 |      — |      — | 2.917 / 3.0     |
+| Run 3 (`gpt-4o-mini`)  | 1.00 |   0.920 |  0.917 |      — |      — | 2.837 / 3.0     |
+| Run 4 (`gpt-4o-mini`)  | 1.00 |   0.920 |  1.000 |      — |      — | 2.920 / 3.0     |
+| Run 5 (`gpt-4o-mini`)  | 1.00 |   1.000 |  1.000 |  0.960 |  1.000 | 4.960 / 5.0     |
+| Run 6 (`gpt-4o-mini`)  | 1.00 |   0.920 |  1.000 |  0.960 |  1.000 | 4.880 / 5.0     |
+| Run 7 (`gpt-4o-mini`)  | 1.00 |   1.000 |  1.000 |  1.000 |  1.000 | **5.000 / 5.0** |
 
 Notes:
 
-- `gpt-4o-mini` outperformed `gpt-4o` on aggregate. The margin came
-  entirely from the medium task, where `gpt-4o` picked `DATE` for the
-  `order_date` column (truncating the time component) while `gpt-4o-mini`
-  picked `TIMESTAMP`. The grader's spot-check compares against the
-  original timestamps, so lossy type choices are penalized.
-- `gpt-4o-mini` lost 0.0833 on the hard task because it crossed the
-  0.85 auto-`done` threshold mid-fix (after setting 2 of 3 GUCs) and
-  the env terminated the episode before it could apply
-  `effective_cache_size`.
+- Run 7 is the first perfect 5.0/5.0 across all five tasks.
+- The `expert` task previously plateaued at 0.96 because the success
+  threshold (0.95) triggered `done=true` too early. Run 7 nailed it by
+  repairing all corrupted balances before crossing the threshold.
+- Medium task variance (1.0 vs 0.92) comes from whether the agent picks
+  `TIMESTAMP` or `DATE` for `order_date`. The grader spot-checks against
+  original timestamps, so lossy type choices lose 0.08.
 - Both runs validated: deterministic seeds, `sqlparse`-based
   multi-statement execution, error-as-observation recovery, and
   grading sub-rubric visibility via `grading_breakdown`.
 
-Per-run annotated traces are in `notes/first-inference-run.md` and
-`notes/second-inference-run.md`.
+Per-run annotated traces are in `notes/`.
 
 ## Requirements
 
