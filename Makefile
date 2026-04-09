@@ -10,7 +10,7 @@ HOST_URL ?= http://localhost:8000
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check-env build up down restart logs shell demo inference smoke validate clean
+.PHONY: help check-env build up down restart logs shell demo inference smoke validate clean deploy ping submit
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -57,6 +57,54 @@ smoke: ## Run host-side curl smoke test against localhost:8000
 
 validate: ## Run `openenv validate` inside the container
 	$(COMPOSE) exec $(SERVICE) openenv validate
+
+# ---------------------------------------------------------------------------
+# Deployment & submission
+# ---------------------------------------------------------------------------
+
+HF_SPACE_ID ?= charanx/postgres_dba_gym
+HF_SPACE_URL ?= https://charanx-postgres-dba-gym.hf.space
+GITHUB_REPO  ?= https://github.com/CharanMN7/postgresql-dba-gym
+
+deploy: ## Push to HF Space (openenv push, fallback to deploy.sh)
+	@echo "==> Validating..."
+	openenv validate
+	@echo ""
+	@echo "==> Pushing to HF Space: $(HF_SPACE_ID)"
+	openenv push --repo-id $(HF_SPACE_ID) \
+	  || { echo "openenv push failed, falling back to deploy.sh"; ./deploy.sh; }
+	@echo ""
+	@echo "==> Deployed. Wait for Space to reach 'Running'."
+	@echo "    https://huggingface.co/spaces/$(HF_SPACE_ID)"
+
+ping: ## Check if the HF Space is live (POST /reset)
+	@http_code=$$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+	  -H 'Content-Type: application/json' -d '{}' \
+	  $(HF_SPACE_URL)/reset --max-time 30 2>/dev/null); \
+	if [ "$$http_code" = "200" ]; then \
+	  echo "OK: $(HF_SPACE_URL)/reset returned 200"; \
+	else \
+	  echo "FAIL: $(HF_SPACE_URL)/reset returned $$http_code"; exit 1; \
+	fi
+
+submit: ## Full pre-submission checklist: validate, deploy, ping
+	@echo "=== Step 1/3: openenv validate ==="
+	openenv validate
+	@echo ""
+	@echo "=== Step 2/3: git push ==="
+	git push origin main
+	@echo ""
+	@echo "=== Step 3/3: deploy to HF Space ==="
+	$(MAKE) deploy
+	@echo ""
+	@echo "============================================"
+	@echo " Submission ready. Go to the hackathon portal"
+	@echo " and submit with:"
+	@echo "   GitHub:   $(GITHUB_REPO)"
+	@echo "   HF Space: https://huggingface.co/spaces/$(HF_SPACE_ID)"
+	@echo "============================================"
+
+# ---------------------------------------------------------------------------
 
 clean: ## Stop, remove volumes, and prune dangling images
 	$(COMPOSE) down -v
