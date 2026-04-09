@@ -200,9 +200,86 @@ def chart_medium_pass() -> None:
     print(f"  -> {OUT_DIR / 'medium_pass_rate.png'}")
 
 
+COST_DATA = [
+    # (model, best_score, total_cost_cents, source_label)
+    ("gpt-4o-mini",    5.000,  2, "OpenAI"),
+    ("gpt-3.5-turbo",  4.865,  4, "OpenAI"),
+    ("Gemma-3-27B",    4.825,  5, "HF Inference"),
+    ("Llama-3.1-8B",   3.530,  5, "HF Inference"),
+    ("Llama-4-Scout",  4.825,  6, "HF Inference"),
+    ("Llama-3.3-70B",  4.825,  9, "HF Inference"),
+    ("Qwen2.5-72B",    4.825, 18, "HF Inference"),
+]
+
+
+def chart_cost_efficiency() -> None:
+    fig, ax = plt.subplots(figsize=(10, 7))
+    fig.patch.set_facecolor(BG)
+    _apply_theme(ax)
+
+    source_styles = {
+        "OpenAI":       {"color": "#ffd700", "marker": "D"},
+        "HF Inference": {"color": "#4fc3f7", "marker": "o"},
+    }
+
+    label_offsets = {
+        "gpt-4o-mini":    (10,   8),
+        "gpt-3.5-turbo":  (5,  10),
+        "Gemma-3-27B":    (3, -16),
+        "Llama-3.1-8B":   (10,   8),
+        "Llama-4-Scout":  (5,   5),
+        "Llama-3.3-70B":  (10,  -4),
+        "Qwen2.5-72B":    (10,  -4),
+    }
+
+    for model, score, cost, source in COST_DATA:
+        style = source_styles[source]
+        ax.scatter(
+            cost, score,
+            c=style["color"], marker=style["marker"],
+            s=180, zorder=5, edgecolors="white", linewidths=0.8,
+        )
+        offset = label_offsets.get(model, (10, -4))
+        ax.annotate(
+            model, (cost, score),
+            textcoords="offset points", xytext=offset,
+            color=FG, fontsize=9.5, fontweight="bold",
+        )
+
+    for source, style in source_styles.items():
+        ax.scatter(
+            [], [], c=style["color"], marker=style["marker"],
+            s=100, label=source, edgecolors="white", linewidths=0.8,
+        )
+
+    ax.set_xlabel("Total Evaluation Cost (cents)", fontsize=11)
+    ax.set_ylabel("Best Aggregate Score (out of 5.0)", fontsize=11)
+    ax.set_title(
+        "Cost vs Performance — Entire 31-Run Evaluation: $0.54",
+        fontsize=14, fontweight="bold", pad=12,
+    )
+    ax.set_xlim(-1, 22)
+    ax.set_ylim(3.0, 5.3)
+    ax.xaxis.grid(True, color=GRID, linewidth=0.5)
+    ax.yaxis.grid(True, color=GRID, linewidth=0.5)
+    ax.set_axisbelow(True)
+
+    legend = ax.legend(
+        loc="lower right", fontsize=10,
+        facecolor=BG, edgecolor=GRID, labelcolor=FG,
+    )
+    legend.get_frame().set_alpha(0.9)
+
+    fig.tight_layout()
+    fig.savefig(OUT_DIR / "cost_vs_performance.png", dpi=180, facecolor=BG)
+    plt.close(fig)
+    print(f"  -> {OUT_DIR / 'cost_vs_performance.png'}")
+
+
 if __name__ == "__main__":
     print("Generating charts...")
     chart_leaderboard()
     chart_heatmap()
     chart_medium_pass()
+    chart_cost_efficiency()
     print("Done.")
