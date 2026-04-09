@@ -36,10 +36,13 @@ looks like:
 - "The cluster is on fire. There are four things wrong simultaneously.
   Triage and fix in any order."
 
-Those are exactly the three tasks in this environment, and they all
-require the agent to *read database state*, decide what to do, *issue
-SQL*, and *verify the fix worked* — the full DBA loop, against ground
-truth, with zero rubric handwaving.
+Those are three of the five tasks in this environment. The other two
+cover disaster recovery (restoring from in-schema backup copies after a
+simulated data-loss incident) and a security audit (locking down
+misconfigured roles and public-schema ACLs). All of them require the
+agent to *read database state*, decide what to do, *issue SQL*, and
+*verify the fix worked* — the full DBA loop, against ground truth, with
+zero rubric handwaving.
 
 ## Tasks
 
@@ -48,6 +51,8 @@ truth, with zero rubric handwaving.
 | `easy` | Index Optimization | EXPLAIN ANALYZE reading, composite-index design, verifying speedup |
 | `medium` | Schema Migration | Normalization, FK/unique/NOT NULL constraints, backward-compatible views |
 | `hard` | Performance Diagnosis | Multi-symptom triage: missing indexes, bloat (VACUUM FULL), GUC tuning (`ALTER SYSTEM`), `pg_terminate_backend` on a stuck blocker |
+| `backup_recovery` | Backup & Recovery | Restoring rows from in-schema backup copies, recreating a dropped JSONB audit table, repairing corrupted values, verifying row-count + integrity against the backup |
+| `security_audit` | Security Audit | Role hygiene (`ALTER ROLE ... NOSUPERUSER`, `WITH PASSWORD`), schema ACLs (`REVOKE CREATE ON SCHEMA public FROM PUBLIC`), least-privilege table grants (`REVOKE SELECT ON ... salaries`) |
 
 Each task ships with a deterministic seed, a per-step grader, and a
 sub-rubric `grading_breakdown` so the agent can see exactly which slice
@@ -65,7 +70,7 @@ Single Docker container based on `python:3.11-slim`:
 │                                              ▼                     │
 │           ┌─── PostgresDBAEnvironment (singleton) ───┐             │
 │           │  • ThreadedConnectionPool  (psycopg2)    │             │
-│           │  • current_task ∈ {easy, medium, hard}   │             │
+│           │  • current_task ∈ 5 registered tasks     │             │
 │           │  • DBAState.task_data scratch            │             │
 │           └──────────────────────────────────────────┘             │
 └────────────────────────────────────────────────────────────────────┘
@@ -93,6 +98,8 @@ server/tasks/base.py                  BaseTask ABC + GradingResult
 server/tasks/index_optimization.py    Task 1 grader
 server/tasks/schema_migration.py      Task 2 grader
 server/tasks/performance_diagnosis.py Task 3 grader (with idle-blocker thread)
+server/tasks/backup_recovery.py       Task 4 grader (restore from in-schema backups)
+server/tasks/security_audit.py        Task 5 grader (role + ACL hygiene)
 server/Dockerfile                     python:3.11-slim + Postgres 16, runs as UID 1000
 sql/seed_*.sql                        Deterministic per-task seeds
 scripts/start.sh                      Container entrypoint: pg_ctl → bootstrap → uvicorn
