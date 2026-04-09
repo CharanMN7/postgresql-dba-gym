@@ -108,6 +108,17 @@ TASK_ORDER: List[str] = [
 DEFAULT_MAX_STEPS = 25
 SUCCESS_THRESHOLD = 0.85
 
+_SCORE_EPS = 1e-4
+
+
+def _clamp_score(score: float) -> float:
+    """Clamp a score into the open interval (0, 1).
+
+    The hackathon validator rejects exact 0.0 and 1.0 — scores must be
+    strictly between 0 and 1.
+    """
+    return max(_SCORE_EPS, min(1.0 - _SCORE_EPS, score))
+
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.openai.com/v1"
 MODEL_NAME = os.getenv("MODEL_NAME") or "gpt-4o-mini"
@@ -309,7 +320,7 @@ async def run_task(
                 content = chat.choices[0].message.content or ""
             except Exception as exc:
                 msg = f"llm error: {exc}"
-                log_step(n, "", score, True, msg)
+                log_step(n, "", _clamp_score(score), True, msg)
                 per_step_rewards.append(score)
                 steps_taken = n
                 done = True
@@ -325,7 +336,7 @@ async def run_task(
                 )
             except Exception as exc:
                 msg = f"env step error: {exc}"
-                log_step(n, action_sql, score, True, msg)
+                log_step(n, action_sql, _clamp_score(score), True, msg)
                 per_step_rewards.append(score)
                 steps_taken = n
                 done = True
@@ -336,7 +347,7 @@ async def run_task(
             done = bool(result.done)
             obs_err = obs.get("error")
 
-            log_step(n, action_sql, reward, done, obs_err)
+            log_step(n, action_sql, _clamp_score(reward), done, obs_err)
             per_step_rewards.append(reward)
             steps_taken = n
             score = reward
@@ -363,10 +374,12 @@ async def run_task(
             flush=True,
         )
     finally:
+        clamped = _clamp_score(score)
+        clamped_rewards = [_clamp_score(r) for r in per_step_rewards]
         success = score >= SUCCESS_THRESHOLD
-        log_end(success=success, steps=steps_taken, score=score, rewards=per_step_rewards)
+        log_end(success=success, steps=steps_taken, score=clamped, rewards=clamped_rewards)
 
-    return score
+    return clamped
 
 
 # ---------------------------------------------------------------------------

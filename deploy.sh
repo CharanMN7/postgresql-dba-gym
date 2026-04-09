@@ -11,7 +11,7 @@
 # will pick it up on first push).
 set -euo pipefail
 
-SPACE_NAME="${SPACE_NAME:-CharanMN7/postgresql-dba-gym}"
+SPACE_NAME="${SPACE_NAME:-charanx/postgres_dba_gym}"
 
 echo "==> Deploying to HuggingFace Space: ${SPACE_NAME}"
 echo "    Make sure the Space exists and is configured as sdk=docker."
