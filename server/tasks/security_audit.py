@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 class SecurityAuditTask(BaseTask):
     NAME = "Security Audit"
-    DIFFICULTY = "security_audit"
+    DIFFICULTY = "master"
     SHORT_DESCRIPTION = (
         "Fix four role / permission misconfigurations: a rogue SUPERUSER, "
         "an over-permissive public schema, a sensitive-data leak, and a "
@@ -48,7 +48,7 @@ class SecurityAuditTask(BaseTask):
 
     def get_description(self) -> str:
         return (
-            "TASK 5 — Security Audit & Access Control (security_audit)\n"
+            "TASK 5 — Security Audit & Access Control (master)\n"
             "Database: dba_gym  |  Schema: task_schema\n\n"
             "A compliance audit has flagged four access-control issues:\n\n"
             "  1. analytics_user has SUPERUSER (critical — BI team role should be\n"

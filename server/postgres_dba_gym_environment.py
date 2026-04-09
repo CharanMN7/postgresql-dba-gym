@@ -156,7 +156,7 @@ class PostgresDBAEnvironment(Environment[DBAAction, DBAObservation, DBAState]):
             episode_id: Optional caller-supplied episode id. We generate
                 one if not provided.
             task: One of the registered task ids (``easy``, ``medium``,
-                ``hard``, ``backup_recovery``, ``security_audit``). Unknown
+                ``hard``, ``expert``, ``master``). Unknown
                 values fall back to ``easy`` with a warning so the agent
                 gets *something* rather than an HTTP error.
         """

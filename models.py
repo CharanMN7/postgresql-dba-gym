@@ -50,8 +50,7 @@ class DBAObservation(Observation):
     task_id: Optional[str] = Field(
         default=None,
         description=(
-            "Active task id (easy / medium / hard / backup_recovery / "
-            "security_audit)"
+            "Active task id (easy / medium / hard / expert / master)"
         ),
     )
     step_index: int = Field(default=0, description="1-indexed step counter")

@@ -39,20 +39,21 @@ looks like:
 Those are three of the five tasks in this environment. The other two
 cover disaster recovery (restoring from in-schema backup copies after a
 simulated data-loss incident) and a security audit (locking down
-misconfigured roles and public-schema ACLs). All of them require the
+misconfigured roles and public-schema ACLs), labelled `expert` and
+`master` respectively. All of them require the
 agent to *read database state*, decide what to do, *issue SQL*, and
 *verify the fix worked* — the full DBA loop, against ground truth, with
 zero rubric handwaving.
 
 ## Tasks
 
-| ID | Name | Skills exercised |
-|---|---|---|
-| `easy` | Index Optimization | EXPLAIN ANALYZE reading, composite-index design, verifying speedup |
-| `medium` | Schema Migration | Normalization, FK/unique/NOT NULL constraints, backward-compatible views |
-| `hard` | Performance Diagnosis | Multi-symptom triage: missing indexes, bloat (VACUUM FULL), GUC tuning (`ALTER SYSTEM`), `pg_terminate_backend` on a stuck blocker |
-| `backup_recovery` | Backup & Recovery | Restoring rows from in-schema backup copies, recreating a dropped JSONB audit table, repairing corrupted values, verifying row-count + integrity against the backup |
-| `security_audit` | Security Audit | Role hygiene (`ALTER ROLE ... NOSUPERUSER`, `WITH PASSWORD`), schema ACLs (`REVOKE CREATE ON SCHEMA public FROM PUBLIC`), least-privilege table grants (`REVOKE SELECT ON ... salaries`) |
+| ID       | Name                  | Skills exercised                                                                                                                                                                         |
+| -------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `easy`   | Index Optimization    | EXPLAIN ANALYZE reading, composite-index design, verifying speedup                                                                                                                       |
+| `medium` | Schema Migration      | Normalization, FK/unique/NOT NULL constraints, backward-compatible views                                                                                                                 |
+| `hard`   | Performance Diagnosis | Multi-symptom triage: missing indexes, bloat (VACUUM FULL), GUC tuning (`ALTER SYSTEM`), `pg_terminate_backend` on a stuck blocker                                                       |
+| `expert` | Backup & Recovery     | Restoring rows from in-schema backup copies, recreating a dropped JSONB audit table, repairing corrupted values, verifying row-count + integrity against the backup                      |
+| `master` | Security Audit        | Role hygiene (`ALTER ROLE ... NOSUPERUSER`, `WITH PASSWORD`), schema ACLs (`REVOKE CREATE ON SCHEMA public FROM PUBLIC`), least-privilege table grants (`REVOKE SELECT ON ... salaries`) |
 
 Each task ships with a deterministic seed, a per-step grader, and a
 sub-rubric `grading_breakdown` so the agent can see exactly which slice
@@ -112,21 +113,21 @@ demo.py                               Hand-crafted scripted demo (no LLM)
 Standard OpenEnv routes (auto-registered by `openenv-core`'s
 `create_app`):
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/reset` | Reset to a fresh episode. JSON body: `{"task": "easy"}`. |
-| `POST` | `/step` | Execute one action. JSON body: `{"action": {"sql": "...", "done": false}}`. |
-| `GET`  | `/state` | Inspect the current `DBAState`. |
-| `GET`  | `/health` | Liveness probe (used by Docker `HEALTHCHECK`). |
-| `GET`  | `/schema` | Pydantic schemas for action/observation/state. |
-| `GET`  | `/docs` | FastAPI auto-generated OpenAPI docs. |
+| Method | Path      | Purpose                                                                                                          |
+| ------ | --------- | ---------------------------------------------------------------------------------------------------------------- |
+| `POST` | `/reset`  | Reset to a fresh episode. JSON body: `{"task": "easy"}`. Task ids: `easy`, `medium`, `hard`, `expert`, `master`. |
+| `POST` | `/step`   | Execute one action. JSON body: `{"action": {"sql": "...", "done": false}}`.                                      |
+| `GET`  | `/state`  | Inspect the current `DBAState`.                                                                                  |
+| `GET`  | `/health` | Liveness probe (used by Docker `HEALTHCHECK`).                                                                   |
+| `GET`  | `/schema` | Pydantic schemas for action/observation/state.                                                                   |
+| `GET`  | `/docs`   | FastAPI auto-generated OpenAPI docs.                                                                             |
 
 Plus two convenience routes:
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/tasks` | List all registered tasks with descriptors. |
-| `GET` | `/grade/{task_id}` | Re-run the active task's grader on demand. |
+| Method | Path               | Purpose                                     |
+| ------ | ------------------ | ------------------------------------------- |
+| `GET`  | `/tasks`           | List all registered tasks with descriptors. |
+| `GET`  | `/grade/{task_id}` | Re-run the active task's grader on demand.  |
 
 ## How to run
 
@@ -207,12 +208,12 @@ python inference.py
 
 Required environment variables:
 
-| Variable        | Example                        | Purpose                                  |
-|-----------------|--------------------------------|------------------------------------------|
-| `HF_TOKEN`      | `sk-...`                       | OpenAI API key (name mandated by hackathon spec) |
-| `MODEL_NAME`    | `gpt-4o-mini`                  | LLM identifier                           |
-| `API_BASE_URL`  | `https://api.openai.com/v1`    | OpenAI-compatible base URL               |
-| `ENV_URL`       | `http://localhost:8000`        | Running environment server URL           |
+| Variable       | Example                     | Purpose                                          |
+| -------------- | --------------------------- | ------------------------------------------------ |
+| `HF_TOKEN`     | `sk-...`                    | OpenAI API key (name mandated by hackathon spec) |
+| `MODEL_NAME`   | `gpt-4o-mini`               | LLM identifier                                   |
+| `API_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible base URL                       |
+| `ENV_URL`      | `http://localhost:8000`     | Running environment server URL                   |
 
 For the judge path, set `IMAGE_NAME=pg-dba-gym` instead of `ENV_URL` —
 `inference.py` will spin up a fresh container via
@@ -337,10 +338,10 @@ Both runs used `inference.py` with temperature 0.2 and default
 `max_steps = 25`. Scores are per-task reward in `[0, 1]` at
 episode end.
 
-| Model         | easy | medium | hard   | aggregate |
-|---------------|-----:|-------:|-------:|----------:|
-| `gpt-4o`      | 1.00 | 0.865  | 1.000  | 2.865 / 3.0 |
-| `gpt-4o-mini` | 1.00 | 1.000  | 0.9167 | 2.917 / 3.0 |
+| Model         | easy | medium |   hard |   aggregate |
+| ------------- | ---: | -----: | -----: | ----------: |
+| `gpt-4o`      | 1.00 |  0.865 |  1.000 | 2.865 / 3.0 |
+| `gpt-4o-mini` | 1.00 |  1.000 | 0.9167 | 2.917 / 3.0 |
 
 Notes:
 
@@ -372,7 +373,3 @@ openai>=1.30.0
 requests>=2.31.0
 sqlparse>=0.5.0
 ```
-
-## License
-
-MIT.

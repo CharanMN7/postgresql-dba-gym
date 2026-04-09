@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 class BackupRecoveryTask(BaseTask):
     NAME = "Backup & Recovery"
-    DIFFICULTY = "backup_recovery"
+    DIFFICULTY = "expert"
     SHORT_DESCRIPTION = (
         "Restore corrupted/deleted data from in-schema backup copies after a "
         "simulated data-loss incident."
@@ -49,7 +49,7 @@ class BackupRecoveryTask(BaseTask):
 
     def get_description(self) -> str:
         return (
-            "TASK 4 — Backup & Recovery (backup_recovery)\n"
+            "TASK 4 — Backup & Recovery (expert)\n"
             "Database: dba_gym  |  Schema: task_schema\n\n"
             "DISASTER: data loss has been detected in the production database.\n"
             "  * customers is missing ~100 rows (deleted)\n"

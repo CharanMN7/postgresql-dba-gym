@@ -22,8 +22,8 @@ def build_task_registry() -> Dict[str, BaseTask]:
         "easy": IndexOptimizationTask(),
         "medium": SchemaMigrationTask(),
         "hard": PerformanceDiagnosisTask(),
-        "backup_recovery": BackupRecoveryTask(),
-        "security_audit": SecurityAuditTask(),
+        "expert": BackupRecoveryTask(),
+        "master": SecurityAuditTask(),
     }
 
 

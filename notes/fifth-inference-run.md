@@ -2,11 +2,11 @@
 
 Date: 2026-04-09
 Model: `gpt-4o-mini`
-Final scores: `{"easy": 1.0, "medium": 1.0, "hard": 1.0, "backup_recovery": 0.960, "security_audit": 1.0}`
+Final scores: `{"easy": 1.0, "medium": 1.0, "hard": 1.0, "expert": 0.960, "master": 1.0}`
 Aggregate: **4.960 / 5.0**
 
-This is the first run with all five tasks. `backup_recovery` and
-`security_audit` are brand-new additions. The three original tasks
+This is the first run with all five tasks. `expert` and
+`master` are brand-new additions. The three original tasks
 still run first in their established order.
 
 ---
@@ -18,15 +18,15 @@ still run first in their established order.
 | easy            | 1.000 / 2 steps | 1.000 / 2 steps  | 1.000 / 2 steps  | 1.000 / 1 step     | **1.000 / 2 steps**    |
 | medium          | 0.865 / 7 steps | 1.000 / 8 steps  | 0.920 / 6 steps  | 0.920 / 6 steps    | **1.000 / 8 steps**    |
 | hard            | 1.000 / 10 steps| 0.917 / 8 steps  | 0.917 / 8 steps  | 1.000 / 9 steps    | **1.000 / 8 steps**    |
-| backup_recovery | —               | —                | —                | —                  | **0.960 / 3 steps**    |
-| security_audit  | —               | —                | —                | —                  | **1.000 / 4 steps**    |
+| expert          | —               | —                | —                | —                  | **0.960 / 3 steps**    |
+| master          | —               | —                | —                | —                  | **1.000 / 4 steps**    |
 | total (orig 3)  | 2.865           | 2.917            | 2.837            | 2.920              | **3.000**              |
 | total (all 5)   | —               | —                | —                | —                  | **4.960**              |
 
 This is the first perfect 3.000 / 3.0 on the original three tasks —
 ever, across all five runs, across both models. It's also the first
 time medium hit 1.0 since run 2. The new tasks perform exactly as
-intended: security_audit is clean, backup_recovery surfaces a
+intended: master is clean, expert surfaces a
 threshold-ceiling problem that mirrors the hard-task experience from
 runs 2–3.
 
@@ -115,7 +115,7 @@ items and assembles them in whatever order the first step primes.
 
 ---
 
-## Task 4 — Backup & Recovery (backup_recovery) — 0.960 in 3 steps *(NEW)*
+## Task 4 — Backup & Recovery (expert) — 0.960 in 3 steps *(NEW)*
 
 | # | Action | Reward | Note |
 |---|--------|-------:|------|
@@ -158,7 +158,7 @@ from `0.95` to something higher, like `0.98`.
 
 ### Recommendation: bump `SUCCESS_THRESHOLD` to 0.98
 
-The backup_recovery task specifically sets `SUCCESS_THRESHOLD = 0.95`
+The expert task specifically sets `SUCCESS_THRESHOLD = 0.95`
 with the comment: "Data loss is binary — we require all four
 sub-rubrics to land for 'success'. 0.85 would let 3-of-4 slip
 through." The intent is right, but 0.95 is still too low — it lets
@@ -168,7 +168,7 @@ forces it to address the corrupted values.
 
 ---
 
-## Task 5 — Security Audit (security_audit) — 1.000 in 4 steps *(NEW)*
+## Task 5 — Security Audit (master) — 1.000 in 4 steps *(NEW)*
 
 | # | Action | Reward | Note |
 |---|--------|-------:|------|
@@ -215,7 +215,7 @@ is solid.
 
 ## Run-over-run variance (updated)
 
-| Source of variance              | Easy                     | Medium                                          | Hard                              | Backup Recovery          | Security Audit      |
+| Source of variance              | Easy                     | Medium                                          | Hard                              | Expert                   | Master              |
 |---------------------------------|--------------------------|-------------------------------------------------|-----------------------------------|--------------------------|---------------------|
 | Grader RNG                      | none                     | none                                            | none                              | none                     | none                |
 | Model output stochasticity      | ±1 step (diag or not)    | **±0.08** (2/4 mini runs aliased, 2/4 didn't)   | ±1 step (diag or not)             | unknown (n=1)            | unknown (n=1)       |
@@ -238,13 +238,13 @@ is solid.
    is ~0.96, up from the ~0.95 estimated after run 4. The "outlier"
    framing from run 3 was premature — both outcomes are equally likely.
 
-3. **backup_recovery has the threshold-ceiling problem.** The agent
+3. **expert has the threshold-ceiling problem.** The agent
    completed 3 of 4 objectives in 3 steps, hit 0.96, and was
    auto-terminated before it could fix corrupted balances. This is the
    same class of bug that the hard-task threshold bump solved.
    `BackupRecoveryTask.SUCCESS_THRESHOLD` should be bumped to 0.98.
 
-4. **security_audit works but doesn't differentiate.** The task is
+4. **master works but doesn't differentiate.** The task is
    effectively solved by reading the objectives section of its own
    prompt. For the benchmark's current purpose (testing the
    harness + grader pipeline end to end), this is fine. For model
@@ -252,8 +252,8 @@ is solid.
 
 5. **Mini's step efficiency is improving via sampling.** Hard went from
    9 steps (run 4) to 8 steps (run 5) by skipping EXPLAIN ANALYZE.
-   backup_recovery solved in 3 steps out of a 25-step budget.
-   security_audit solved in 4 steps with no discovery. The model is
+   expert solved in 3 steps out of a 25-step budget.
+   master solved in 4 steps with no discovery. The model is
    not wasting tokens on exploration when the task is well-specified.
 
 ---
@@ -278,8 +278,8 @@ faithful to that intent than 0.95.
 `gpt-4o-mini` ran all five tasks and scored **4.960 / 5.0**. The
 three original tasks hit a combined **3.000 / 3.0** for the first
 time ever — medium's view-alias coin flip landed correctly, and hard
-remains perfect post-threshold-bump. `security_audit` is a clean
-1.0 in 4 steps (no discovery needed). `backup_recovery` is 0.96 —
+remains perfect post-threshold-bump. `master` is a clean
+1.0 in 4 steps (no discovery needed). `expert` is 0.96 —
 the agent restored rows and audit_log in 3 efficient steps but was
 auto-terminated by the 0.95 `SUCCESS_THRESHOLD` before it could fix
 corrupted balances. This is the same threshold-ceiling pattern that

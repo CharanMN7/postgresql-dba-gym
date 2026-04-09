@@ -1,6 +1,6 @@
 """Baseline LLM agent for the PostgreSQL DBA Gym (OpenEnv hackathon harness).
 
-Runs five DBA tasks (easy / medium / hard / backup_recovery / security_audit)
+Runs five DBA tasks (easy / medium / hard / expert / master)
 end-to-end against an
 OpenEnv-compliant server — either a fresh Docker container spun up via
 ``GenericEnvClient.from_docker_image(IMAGE_NAME)`` (the evaluator path) or
@@ -53,8 +53,8 @@ TASK_ORDER: List[str] = [
     "easy",
     "medium",
     "hard",
-    "backup_recovery",
-    "security_audit",
+    "expert",
+    "master",
 ]
 DEFAULT_MAX_STEPS = 25
 SUCCESS_THRESHOLD = 0.85
