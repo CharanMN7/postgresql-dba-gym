@@ -92,8 +92,24 @@ def borrow_connection(
         yield conn
     finally:
         try:
-            if not conn.closed and not autocommit:
-                conn.rollback()
+            if not conn.closed:
+                # Always check for stale explicit transactions. An agent
+                # can issue BEGIN which starts a server-side transaction
+                # even in autocommit mode.  If an error occurs mid-batch,
+                # the COMMIT at the end of the multi-statement never
+                # executes, leaving the connection in INERROR state.
+                # psycopg2's conn.rollback() is a no-op in autocommit
+                # mode, so we send ROLLBACK as raw SQL when needed.
+                txn_status = conn.get_transaction_status()
+                if txn_status in (
+                    psycopg2.extensions.TRANSACTION_STATUS_INTRANS,
+                    psycopg2.extensions.TRANSACTION_STATUS_INERROR,
+                ):
+                    conn.autocommit = False
+                    conn.rollback()
+                    conn.autocommit = autocommit
+                elif not autocommit:
+                    conn.rollback()
         except psycopg2.Error:
             pass
         pool.putconn(conn)
