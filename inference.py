@@ -8,11 +8,12 @@ a pre-running server at ``ENV_URL`` (the local-dev path).
 
 Environment variables
 ---------------------
-``HF_TOKEN``      — OpenAI API key (the hackathon-mandated variable name).
-``API_BASE_URL``  — OpenAI API base URL (default: ``https://api.openai.com/v1``).
-``MODEL_NAME``    — OpenAI model id (default: ``gpt-4o-mini``).
-``IMAGE_NAME``    — if set, ``GenericEnvClient.from_docker_image`` is used to
-                    spin up a fresh container for the run.
+``HF_TOKEN``      — API key (the hackathon-mandated variable name; ``API_KEY`` also accepted).
+``API_BASE_URL``  — LLM API base URL (default: ``https://router.huggingface.co/v1``).
+``MODEL_NAME``    — LLM model id (default: ``Qwen/Qwen2.5-72B-Instruct``).
+``IMAGE_NAME``    — if set (or ``LOCAL_IMAGE_NAME``),
+                    ``GenericEnvClient.from_docker_image`` is used to spin up
+                    a fresh container for the run.
 ``ENV_URL``       — fallback base URL when ``IMAGE_NAME`` is unset
                     (default: ``http://localhost:8000``).
 
@@ -58,10 +59,10 @@ TASK_ORDER: List[str] = [
 DEFAULT_MAX_STEPS = 25
 SUCCESS_THRESHOLD = 0.85
 
-API_KEY = os.getenv("HF_TOKEN")
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.openai.com/v1"
-MODEL_NAME = os.getenv("MODEL_NAME") or "gpt-4o-mini"
-IMAGE_NAME = os.getenv("IMAGE_NAME")
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
+MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
+IMAGE_NAME = os.getenv("IMAGE_NAME") or os.getenv("LOCAL_IMAGE_NAME")
 ENV_URL = os.getenv("ENV_URL", "http://localhost:8000").rstrip("/")
 
 
@@ -286,9 +287,20 @@ async def run_task(
 
 
 async def _open_env() -> GenericEnvClient:
-    """Open an env client via Docker image (preferred) or live base URL."""
+    """Open an env client via Docker image (preferred) or live base URL.
+
+    Falls back to the URL-based connection if Docker is unavailable
+    (e.g. the evaluator already manages the container externally).
+    """
     if IMAGE_NAME:
-        return await GenericEnvClient.from_docker_image(IMAGE_NAME)
+        try:
+            return await GenericEnvClient.from_docker_image(IMAGE_NAME)
+        except Exception as exc:
+            print(
+                f"[DEBUG] from_docker_image failed ({exc!r}), "
+                f"falling back to ENV_URL={ENV_URL}",
+                flush=True,
+            )
     env = GenericEnvClient(base_url=ENV_URL)
     await env.connect()
     return env
@@ -296,12 +308,11 @@ async def _open_env() -> GenericEnvClient:
 
 async def main() -> int:
     if not API_KEY:
-        raise ValueError(
-            "HF_TOKEN environment variable is required. "
-            "Set it to your OpenAI API key — the hackathon spec mandates the "
-            "variable name `HF_TOKEN` and it is passed as the OpenAI client "
-            "`api_key`."
+        print(
+            "[ERROR] HF_TOKEN (or API_KEY) environment variable is required.",
+            flush=True,
         )
+        return 1
 
     llm = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
     env: Optional[GenericEnvClient] = None
@@ -315,6 +326,9 @@ async def main() -> int:
                 model=MODEL_NAME,
                 max_steps=DEFAULT_MAX_STEPS,
             )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ERROR] fatal: {exc!r}", flush=True)
+        return 1
     finally:
         if env is not None:
             try:
@@ -326,4 +340,8 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    try:
+        sys.exit(asyncio.run(main()))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ERROR] top-level: {exc!r}", flush=True)
+        sys.exit(1)
