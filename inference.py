@@ -1,6 +1,7 @@
 """Baseline LLM agent for the PostgreSQL DBA Gym (OpenEnv hackathon harness).
 
-Runs three DBA tasks (easy / medium / hard) end-to-end against an
+Runs five DBA tasks (easy / medium / hard / backup_recovery / security_audit)
+end-to-end against an
 OpenEnv-compliant server — either a fresh Docker container spun up via
 ``GenericEnvClient.from_docker_image(IMAGE_NAME)`` (the evaluator path) or
 a pre-running server at ``ENV_URL`` (the local-dev path).
@@ -47,7 +48,13 @@ from openenv.core.generic_client import GenericEnvClient
 # ---------------------------------------------------------------------------
 
 ENV_NAME = "postgres_dba_gym"
-TASK_ORDER: List[str] = ["easy", "medium", "hard"]
+TASK_ORDER: List[str] = [
+    "easy",
+    "medium",
+    "hard",
+    "backup_recovery",
+    "security_audit",
+]
 DEFAULT_MAX_STEPS = 25
 SUCCESS_THRESHOLD = 0.85
 

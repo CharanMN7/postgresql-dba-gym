@@ -48,7 +48,11 @@ class DBAObservation(Observation):
         default=None, description="Long-form task prompt (only on /reset)"
     )
     task_id: Optional[str] = Field(
-        default=None, description="Active task id (easy / medium / hard)"
+        default=None,
+        description=(
+            "Active task id (easy / medium / hard / backup_recovery / "
+            "security_audit)"
+        ),
     )
     step_index: int = Field(default=0, description="1-indexed step counter")
     max_steps: int = Field(default=0, description="Step budget for this task")
