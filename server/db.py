@@ -65,6 +65,30 @@ def create_pool(
     )
 
 
+def _drain_stale_transaction(conn: PGConnection) -> None:
+    """Force-clear any stale server-side transaction on *conn*.
+
+    An agent can issue an explicit ``BEGIN`` which starts a server-side
+    transaction even when the connection is in autocommit mode.  If an
+    error occurs before ``COMMIT``, the connection is stuck in
+    ``TRANSACTION_STATUS_INERROR``.  ``conn.rollback()`` is a no-op in
+    autocommit mode, and changing ``conn.autocommit`` raises when the
+    server is in error state.  The only reliable escape is to send
+    ``ROLLBACK`` as raw SQL through a cursor — autocommit mode uses
+    ``PQexec`` which forwards any command straight to PostgreSQL, and
+    PostgreSQL always accepts ``ROLLBACK`` in an aborted transaction.
+    """
+    if conn.closed:
+        return
+    status = conn.get_transaction_status()
+    if status in (
+        psycopg2.extensions.TRANSACTION_STATUS_INTRANS,
+        psycopg2.extensions.TRANSACTION_STATUS_INERROR,
+    ):
+        with conn.cursor() as cur:
+            cur.execute("ROLLBACK")
+
+
 @contextmanager
 def borrow_connection(
     pool: pg_pool.ThreadedConnectionPool,
@@ -87,28 +111,15 @@ def borrow_connection(
     conn = pool.getconn()
     try:
         conn.autocommit = autocommit
+        _drain_stale_transaction(conn)
         with conn.cursor() as cur:
             cur.execute(f"SET statement_timeout = {int(statement_timeout_ms)}")
         yield conn
     finally:
         try:
             if not conn.closed:
-                # Always check for stale explicit transactions. An agent
-                # can issue BEGIN which starts a server-side transaction
-                # even in autocommit mode.  If an error occurs mid-batch,
-                # the COMMIT at the end of the multi-statement never
-                # executes, leaving the connection in INERROR state.
-                # psycopg2's conn.rollback() is a no-op in autocommit
-                # mode, so we send ROLLBACK as raw SQL when needed.
-                txn_status = conn.get_transaction_status()
-                if txn_status in (
-                    psycopg2.extensions.TRANSACTION_STATUS_INTRANS,
-                    psycopg2.extensions.TRANSACTION_STATUS_INERROR,
-                ):
-                    conn.autocommit = False
-                    conn.rollback()
-                    conn.autocommit = autocommit
-                elif not autocommit:
+                _drain_stale_transaction(conn)
+                if not autocommit:
                     conn.rollback()
         except psycopg2.Error:
             pass
