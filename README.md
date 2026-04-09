@@ -25,11 +25,7 @@ tags:
 
 **The first environment for training AI agents on real database operations — not just queries, but the 3am pager work.**
 
-Five DBA tasks against a live PostgreSQL 16 instance, graded
-**deterministically** by querying `pg_catalog`, `information_schema`, and
-`pg_stat_*`. Zero LLM-as-judge — every reward is pure SQL against ground
-truth. Built on [OpenEnv](https://github.com/meta-pytorch/OpenEnv),
-packaged for [Hugging Face Spaces](https://huggingface.co/spaces/charanx/postgres_dba_gym).
+Five DBA tasks against a live PostgreSQL 16 instance, graded **deterministically** by querying `pg_catalog`, `information_schema`, and `pg_stat_*`. Zero LLM-as-judge — every reward is pure SQL against ground truth. Built on [OpenEnv](https://github.com/meta-pytorch/OpenEnv), packaged for [Hugging Face Spaces](https://huggingface.co/spaces/charanx/postgres_dba_gym).
 
 |               |                                                                                 |
 | ------------- | ------------------------------------------------------------------------------- |
@@ -54,28 +50,15 @@ packaged for [Hugging Face Spaces](https://huggingface.co/spaces/charanx/postgre
 
 ## Why DBA?
 
-Every company with a database has been woken up at 3am by a pager. Yet
-every agentic SQL benchmark stops at `SELECT` — they test whether an
-agent can *query* a database, not whether it can *operate* one. There's
-no environment anywhere — not in OpenEnv, not in academic benchmarks, not
-in AgentBench — that tests the operational DBA loop: diagnose →
-hypothesize → fix → verify. This gym fills that gap.
+Every company with a database has been woken up at 3am by a pager. Yet every agentic SQL benchmark stops at `SELECT` — they test whether an agent can *query* a database, not whether it can *operate* one. There's no environment anywhere — not in OpenEnv, not in academic benchmarks, not in AgentBench — that tests the operational DBA loop: diagnose → hypothesize → fix → verify. This gym fills that gap.
 
 Real database work looks like:
 
 - "This query was 50ms yesterday and is 8 seconds today. Find out why."
-- "We're moving from a denormalized blob to a real schema without
-  breaking the read path."
-- "The cluster is on fire. There are four things wrong simultaneously.
-  Triage and fix in any order."
+- "We're moving from a denormalized blob to a real schema without breaking the read path."
+- "The cluster is on fire. There are four things wrong simultaneously. Triage and fix in any order."
 
-Those are three of the five tasks in this environment. The other two
-cover disaster recovery (restoring from in-schema backup copies after a
-simulated data-loss incident) and a security audit (locking down
-misconfigured roles and public-schema ACLs). All of them require the
-agent to *read database state*, decide what to do, *issue SQL*, and
-*verify the fix worked* — the full DBA loop, against ground truth, with
-zero rubric handwaving.
+Those are three of the five tasks in this environment. The other two cover disaster recovery (restoring from in-schema backup copies after a simulated data-loss incident) and a security audit (locking down misconfigured roles and public-schema ACLs). All of them require the agent to *read database state*, decide what to do, *issue SQL*, and *verify the fix worked* — the full DBA loop, against ground truth, with zero rubric handwaving.
 
 <details>
 <summary><strong>These aren't hypothetical — real postmortems from the tasks we train</strong></summary>
@@ -95,9 +78,7 @@ Every one of these maps to a skill this gym trains: index diagnosis, vacuum awar
 
 > **Hugging Face Space:** [https://charanx-postgres-dba-gym.hf.space](https://charanx-postgres-dba-gym.hf.space)
 
-The Space runs the same Docker image as local development. If the Space
-has been idle, expect a cold-start of ~30 seconds while Hugging Face
-rebuilds the container — subsequent requests are fast.
+The Space runs the same Docker image as local development. If the Space has been idle, expect a cold-start of ~30 seconds while Hugging Face rebuilds the container — subsequent requests are fast.
 
 Try it:
 
@@ -118,14 +99,11 @@ curl -X POST https://charanx-postgres-dba-gym.hf.space/reset \
 | `expert` | Backup & Recovery     | ★★★★☆      | Restoring rows from in-schema backup copies, recreating a dropped JSONB audit table, repairing corrupted values, verifying row-count + integrity against the backup                      |
 | `master` | Security Audit        | ★★★★★      | Role hygiene (`ALTER ROLE ... NOSUPERUSER`, `WITH PASSWORD`), schema ACLs (`REVOKE CREATE ON SCHEMA public FROM PUBLIC`), least-privilege table grants (`REVOKE SELECT ON ... salaries`) |
 
-Each task ships with a deterministic seed, a per-step grader, and a
-sub-rubric `grading_breakdown` so the agent can see exactly which slice
-of the task is still 0 and target it.
+Each task ships with a deterministic seed, a per-step grader, and a sub-rubric `grading_breakdown` so the agent can see exactly which slice of the task is still 0 and target it.
 
 ### Difficulty progression
 
-The five tasks are calibrated with escalating success thresholds and
-step budgets to create a genuine difficulty curve:
+The five tasks are calibrated with escalating success thresholds and step budgets to create a genuine difficulty curve:
 
 | Task     | Max steps | Success threshold | Grading style                                             |
 | -------- | --------: | ----------------: | --------------------------------------------------------- |
@@ -135,11 +113,7 @@ step budgets to create a genuine difficulty curve:
 | `expert` |        25 |              0.98 | 4 sub-rubrics × 0.25 (customers, orders, audit, balances) |
 | `master` |        25 |              0.85 | 4 binary checks × 0.25 (superuser, ACL, grants, password) |
 
-The `hard` task requires 0.95 because all four symptoms must be
-addressed. The `expert` task requires 0.98 — near-perfect data recovery.
-Agents that can clear `master` have demonstrated real DBA competence
-across the full spectrum: performance, schema design, triage,
-disaster recovery, and security.
+The `hard` task requires 0.95 because all four symptoms must be addressed. The `expert` task requires 0.98 — near-perfect data recovery. Agents that can clear `master` have demonstrated real DBA competence across the full spectrum: performance, schema design, triage, disaster recovery, and security.
 
 ---
 
@@ -191,9 +165,7 @@ Single Docker container based on `python:3.11-slim`:
                   Agent (e.g. inference.py)
 ```
 
-A single uvicorn worker is **mandatory** — the env is a singleton with
-in-process state (the connection pool, the current task, and the Task 3
-idle-blocker thread).
+A single uvicorn worker is **mandatory** — the env is a singleton with in-process state (the connection pool, the current task, and the Task 3 idle-blocker thread).
 
 ---
 
@@ -247,14 +219,11 @@ postgresql-dba-gym/
 - **Docker** — required for the recommended path and for Hugging Face Space parity.
 - **Python 3.11+** — required for local development outside Docker.
 - **[`uv`](https://docs.astral.sh/uv/)** (recommended) or `pip` — for dependency management.
-- **OpenAI API key** — only required for running the baseline agent (`inference.py`).
-  The hackathon spec re-uses the env var `HF_TOKEN` to carry the OpenAI key.
+- **OpenAI API key** — only required for running the baseline agent (`inference.py`). The hackathon spec re-uses the env var `HF_TOKEN` to carry the OpenAI key.
 
 ### Quick start (Docker Compose — recommended)
 
-No Postgres or Python needed on the host. Everything — server, demo,
-inference, smoke tests — runs inside the container. Env vars are
-loaded from `.env` by `docker compose`, nothing is baked into the image.
+No Postgres or Python needed on the host. Everything — server, demo, inference, smoke tests — runs inside the container. Env vars are loaded from `.env` by `docker compose`, nothing is baked into the image.
 
 ```bash
 # 1. Configure
@@ -278,31 +247,24 @@ make shell         # drop into the container
 make down
 ```
 
-Run `make help` for the full target list (build, up, down, restart,
-logs, shell, demo, inference, smoke, validate, deploy, ping, submit,
-clean).
+Run `make help` for the full target list (build, up, down, restart, logs, shell, demo, inference, smoke, validate, deploy, ping, submit, clean).
 
 ### Alternative: raw `docker build` / `docker run`
 
-If you don't want Compose, you can drive the same image directly. This
-is the exact path Hugging Face Spaces uses.
+If you don't want Compose, you can drive the same image directly. This is the exact path Hugging Face Spaces uses.
 
 ```bash
 docker build -f server/Dockerfile -t pg-dba-gym .
 docker run --rm -p 8000:8000 --env-file .env pg-dba-gym
 ```
 
-The container bundles PostgreSQL 16 and runs as UID 1000. First-time
-boot takes 3-5 seconds while `start.sh` brings up Postgres and
-bootstraps the `dba_gym` database.
+The container bundles PostgreSQL 16 and runs as UID 1000. First-time boot takes 3-5 seconds while `start.sh` brings up Postgres and bootstraps the `dba_gym` database.
 
 ---
 
 ## Running the Demo
 
-`demo.py` runs a hand-crafted, known-good solution through every task
-with no LLM involved. Useful to sanity-check a fresh build in under 30
-seconds:
+`demo.py` runs a hand-crafted, known-good solution through every task with no LLM involved. Useful to sanity-check a fresh build in under 30 seconds:
 
 ```bash
 make demo
@@ -319,9 +281,7 @@ python demo.py
 
 ## Running the Baseline Agent (`inference.py`)
 
-`inference.py` drives the environment with an OpenAI-compatible LLM
-and emits a structured log block per task that matches the hackathon
-judge's parser.
+`inference.py` drives the environment with an OpenAI-compatible LLM and emits a structured log block per task that matches the hackathon judge's parser.
 
 **Quickest path** (inside the container):
 
@@ -351,15 +311,11 @@ python inference.py
 | `IMAGE_NAME`       | `pg-dba-gym`                | Docker image name (triggers `from_docker_image`; optional) |
 | `LOCAL_IMAGE_NAME` | `pg-dba-gym`                | Alias for `IMAGE_NAME` (accepted by evaluator; optional)   |
 
-For the judge path, set `IMAGE_NAME=pg-dba-gym` (or `LOCAL_IMAGE_NAME`)
-instead of `ENV_URL` — `inference.py` will spin up a fresh container via
-`GenericEnvClient.from_docker_image(IMAGE_NAME)`. If Docker is unavailable,
-it falls back to connecting via `ENV_URL`.
+For the judge path, set `IMAGE_NAME=pg-dba-gym` (or `LOCAL_IMAGE_NAME`) instead of `ENV_URL` — `inference.py` will spin up a fresh container via `GenericEnvClient.from_docker_image(IMAGE_NAME)`. If Docker is unavailable, it falls back to connecting via `ENV_URL`.
 
 ### Log output format
 
-`inference.py` emits a structured log block per task that matches the
-hackathon judge's parser exactly:
+`inference.py` emits a structured log block per task that matches the hackathon judge's parser exactly:
 
 ```
 [START] task=easy env=postgres_dba_gym model=Qwen/Qwen2.5-72B-Instruct
@@ -387,8 +343,7 @@ Screenshots of color-coded terminal output from a local inference run:
 
 ## HTTP API
 
-Standard OpenEnv routes (auto-registered by `openenv-core`'s
-`create_app`):
+Standard OpenEnv routes (auto-registered by `openenv-core`'s `create_app`):
 
 | Method | Path      | Purpose                                                                                                          |
 | ------ | --------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -413,26 +368,18 @@ Plus two convenience routes:
 Every task returns a `GradingResult` with:
 
 - **`score`** in `[0.0, 1.0]` — the headline reward.
-- **`breakdown`** — a dict of sub-rubric scores so the agent can see
-  what's still missing.
-- **`notes`** — optional human-readable hints (shown after the SQL output
-  when grading completes).
+- **`breakdown`** — a dict of sub-rubric scores so the agent can see what's still missing.
+- **`notes`** — optional human-readable hints (shown after the SQL output when grading completes).
 
-Sub-rubrics are weighted to keep the overall scale at 1.0. Tasks 2 and 3
-use four equal-weighted sub-rubrics (0.25 each); Task 1 combines a
-multiplicative speedup score with optional optimal-index bonuses.
+Sub-rubrics are weighted to keep the overall scale at 1.0. Tasks 2 and 3 use four equal-weighted sub-rubrics (0.25 each); Task 1 combines a multiplicative speedup score with optional optimal-index bonuses.
 
-The `SUCCESS_THRESHOLD` (default `0.85`) defines when the env auto-flips
-`done=true`. Agents may also self-declare done by setting
-`action.done = true`.
+The `SUCCESS_THRESHOLD` (default `0.85`) defines when the env auto-flips `done=true`. Agents may also self-declare done by setting `action.done = true`.
 
 ---
 
 ## Baseline Scores
 
-All runs used `inference.py` with temperature 0.2 and default
-`max_steps = 25`. Scores are per-task reward in `[0, 1]` at
-episode end.
+All runs used `inference.py` with temperature 0.2 and default `max_steps = 25`. Scores are per-task reward in `[0, 1]` at episode end.
 
 | Run                      | easy | medium |  hard | expert | master |       aggregate |
 | ------------------------ | ---: | -----: | ----: | -----: | -----: | --------------: |
@@ -450,24 +397,11 @@ episode end.
 Notes:
 
 - Run 7 is the first perfect 5.0/5.0 across all five tasks.
-- Run 8 shows the environment is solvable even with the much cheaper
-  `gpt-3.5-turbo`. It loses 0.135 on medium but scores 1.0 on the
-  remaining four tasks.
-- Runs 9 and 10 reproduce the same `gpt-3.5-turbo` failure mode: a
-  23-step degenerate loop on medium (identical action every step) and
-  expert capped at 0.96 by the `customer_id` → `id` column-name error
-  on the final balance-repair step. The identical 4.460 aggregate across
-  both runs suggests this is the deterministic floor for 3.5-turbo on
-  this environment at temperature 0.2.
-- All runs validated: deterministic seeds, `sqlparse`-based
-  multi-statement execution, error-as-observation recovery, and
-  grading sub-rubric visibility via `grading_breakdown`.
+- Run 8 shows the environment is solvable even with the much cheaper `gpt-3.5-turbo`. It loses 0.135 on medium but scores 1.0 on the remaining four tasks.
+- Runs 9 and 10 reproduce the same `gpt-3.5-turbo` failure mode: a 23-step degenerate loop on medium (identical action every step) and expert capped at 0.96 by the `customer_id` → `id` column-name error on the final balance-repair step. The identical 4.460 aggregate across both runs suggests this is the deterministic floor for 3.5-turbo on this environment at temperature 0.2.
+- All runs validated: deterministic seeds, `sqlparse`-based multi-statement execution, error-as-observation recovery, and grading sub-rubric visibility via `grading_breakdown`.
 
-**Difficulty discrimination.** The medium task is the sharpest
-discriminator: `gpt-4o-mini` scores 1.0 while `gpt-3.5-turbo`
-reproducibly collapses into retry loops at 0.50. This confirms the tasks
-aren't just pass/fail — they create a meaningful capability gradient
-across model tiers.
+**Difficulty discrimination.** The medium task is the sharpest discriminator: `gpt-4o-mini` scores 1.0 while `gpt-3.5-turbo` reproducibly collapses into retry loops at 0.50. This confirms the tasks aren't just pass/fail — they create a meaningful capability gradient across model tiers.
 
 Per-run annotated traces are in `notes/`.
 
@@ -475,32 +409,21 @@ Per-run annotated traces are in `notes/`.
 
 ## Determinism
 
-All seeds are written without `random()` — row values are derived from
-deterministic integer hashes (e.g. `((i * 2654435761) % 50000) + 1`)
-and timestamps are anchored at fixed wall-clock origins. This means:
+All seeds are written without `random()` — row values are derived from deterministic integer hashes (e.g. `((i * 2654435761) % 50000) + 1`) and timestamps are anchored at fixed wall-clock origins. This means:
 
 - Two `/reset` calls with the same task produce byte-identical state.
-- `baseline_ms` measurements use a discard-then-median strategy and are
-  cached on `DBAState.task_data` so re-grading uses the same baseline.
-- A given fix produces the same final reward across runs (within
-  measurement noise on Task 1's speedup ratio).
+- `baseline_ms` measurements use a discard-then-median strategy and are cached on `DBAState.task_data` so re-grading uses the same baseline.
+- A given fix produces the same final reward across runs (within measurement noise on Task 1's speedup ratio).
 
 ---
 
 ## Safety & Isolation
 
-- The agent talks to a `dba` superuser, but the schema is wiped and
-  recreated on every `/reset`, so there is nothing to leak between
-  episodes.
-- `ALTER SYSTEM RESET ALL; SELECT pg_reload_conf();` runs on every
-  reset to undo any GUC tweaks from the previous episode.
-- Task 3's idle blocker runs on a *non-pool* connection and is
-  forcibly terminated in `teardown()`.
-- Each step runs with `statement_timeout = 15s` so a runaway query
-  cannot hang the episode.
-- `step()` never raises — psycopg2 errors are captured and returned in
-  the observation's `error` field, so the agent learns to fix typos
-  rather than crash the server.
+- The agent talks to a `dba` superuser, but the schema is wiped and recreated on every `/reset`, so there is nothing to leak between episodes.
+- `ALTER SYSTEM RESET ALL; SELECT pg_reload_conf();` runs on every reset to undo any GUC tweaks from the previous episode.
+- Task 3's idle blocker runs on a *non-pool* connection and is forcibly terminated in `teardown()`.
+- Each step runs with `statement_timeout = 15s` so a runaway query cannot hang the episode.
+- `step()` never raises — psycopg2 errors are captured and returned in the observation's `error` field, so the agent learns to fix typos rather than crash the server.
 
 ---
 
@@ -523,10 +446,7 @@ make ping          # check the Space is live (POST /reset → 200)
 
 **(a) Official OpenEnv push:**
 
-Requires the `openenv` CLI on the host — install it once with
-`pipx install "openenv-core[core]"` (or `uv tool install "openenv-core[core]"`
-if you already use `uv`). `make validate` runs the same check inside
-the container if you'd rather not install anything on the host.
+Requires the `openenv` CLI on the host — install it once with `pipx install "openenv-core[core]"` (or `uv tool install "openenv-core[core]"` if you already use `uv`). `make validate` runs the same check inside the container if you'd rather not install anything on the host.
 
 ```bash
 openenv validate
@@ -540,8 +460,7 @@ export HF_TOKEN=hf_...
 ./deploy.sh
 ```
 
-Both paths upload the repo as a Docker-SDK Space; `scripts/start.sh`
-brings up Postgres and uvicorn on port 8000 inside the Space.
+Both paths upload the repo as a Docker-SDK Space; `scripts/start.sh` brings up Postgres and uvicorn on port 8000 inside the Space.
 
 Once deployed, run the baseline agent against it:
 
@@ -568,59 +487,29 @@ requests>=2.31.0
 sqlparse>=0.5.0
 ```
 
-See [`requirements.txt`](requirements.txt) and
-[`pyproject.toml`](pyproject.toml) for the full dependency specification.
+See [`requirements.txt`](requirements.txt) and [`pyproject.toml`](pyproject.toml) for the full dependency specification.
 
 ---
 
 ## Notes for Evaluators
 
-**OpenEnv spec compliance.** The environment implements the standard
-`reset()` / `step()` / `state()` contract with typed Pydantic models
-(`DBAAction`, `DBAObservation`, `DBAState`), a valid `openenv.yaml`,
-and auto-registered HTTP routes via `openenv-core`'s `create_app`. The
-`inference.py` harness uses the OpenAI Client with the three required
-environment variables (`HF_TOKEN`, `MODEL_NAME`, `API_BASE_URL`) and
-emits structured `[START]` / `[STEP]` / `[END]` logs that match the
-judge's parser exactly.
+**OpenEnv spec compliance.** The environment implements the standard `reset()` / `step()` / `state()` contract with typed Pydantic models (`DBAAction`, `DBAObservation`, `DBAState`), a valid `openenv.yaml`, and auto-registered HTTP routes via `openenv-core`'s `create_app`. The `inference.py` harness uses the OpenAI Client with the three required environment variables (`HF_TOKEN`, `MODEL_NAME`, `API_BASE_URL`) and emits structured `[START]` / `[STEP]` / `[END]` logs that match the judge's parser exactly.
 
-**Zero LLM-as-judge.** Every grading decision is deterministic — scores
-are computed by querying PostgreSQL system catalogs (`pg_catalog`,
-`information_schema`, `pg_stat_*`), not by prompting a language model.
-This makes reward signals reproducible and auditable.
+**Zero LLM-as-judge.** Every grading decision is deterministic — scores are computed by querying PostgreSQL system catalogs (`pg_catalog`, `information_schema`, `pg_stat_*`), not by prompting a language model. This makes reward signals reproducible and auditable.
 
-**Runtime correctness.** `inference.py` runs all 5 tasks end-to-end
-without errors. Cold-start latency inside the container is ~3-5 seconds
-(the Postgres cluster is pre-initialized at Docker build time). A full
-5-task inference run completes in under 10 minutes on modest hardware
-(2 vCPU, 8 GB RAM).
+**Runtime correctness.** `inference.py` runs all 5 tasks end-to-end without errors. Cold-start latency inside the container is ~3-5 seconds (the Postgres cluster is pre-initialized at Docker build time). A full 5-task inference run completes in under 10 minutes on modest hardware (2 vCPU, 8 GB RAM).
 
-**Baseline performance.** The best run (Run 7, `gpt-4o-mini`) achieved
-a **perfect 5.000 / 5.0** aggregate score across all five tasks.
-`gpt-3.5-turbo` ranges from 4.865 (Run 8) down to 4.460 (Runs 9–10,
-where medium reproducibly collapses into a 23-step retry loop),
-confirming the tasks discriminate between model capabilities while
-remaining solvable by cheaper models.
+**Baseline performance.** The best run (Run 7, `gpt-4o-mini`) achieved a **perfect 5.000 / 5.0** aggregate score across all five tasks. `gpt-3.5-turbo` ranges from 4.865 (Run 8) down to 4.460 (Runs 9–10, where medium reproducibly collapses into a 23-step retry loop), confirming the tasks discriminate between model capabilities while remaining solvable by cheaper models.
 
-**Task design.** Five tasks spanning the full DBA spectrum — from
-single-index optimization to multi-symptom cluster triage to security
-hardening — with a clear difficulty progression (escalating success
-thresholds from 0.85 to 0.98), granular sub-rubric breakdowns, and
-deterministic seed data for reproducibility.
+**Task design.** Five tasks spanning the full DBA spectrum — from single-index optimization to multi-symptom cluster triage to security hardening — with a clear difficulty progression (escalating success thresholds from 0.85 to 0.98), granular sub-rubric breakdowns, and deterministic seed data for reproducibility.
 
-**Reusability.** The environment is designed for the broader OpenEnv
-ecosystem: any OpenAI-compatible agent can connect via HTTP, tasks are
-self-contained with independent seeds, and the single-container
-architecture makes deployment trivial on any Docker host or Hugging Face
-Space.
+**Reusability.** The environment is designed for the broader OpenEnv ecosystem: any OpenAI-compatible agent can connect via HTTP, tasks are self-contained with independent seeds, and the single-container architecture makes deployment trivial on any Docker host or Hugging Face Space.
 
 ---
 
 ## Roadmap / Future Tasks
 
-The environment architecture supports arbitrary new tasks — each is a
-self-contained Python class with a SQL seed and a grader. Planned
-additions:
+The environment architecture supports arbitrary new tasks — each is a self-contained Python class with a SQL seed and a grader. Planned additions:
 
 - **Replication setup and failover** — configure streaming replication, promote a standby
 - **Partitioning strategy for large tables** — range/hash partition a billion-row table without downtime
