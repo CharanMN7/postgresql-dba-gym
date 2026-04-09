@@ -33,6 +33,29 @@ Five DBA tasks against a live PostgreSQL 16 instance, graded **deterministically
 | **GitHub**    | [CharanMN7/postgresql-dba-gym](https://github.com/CharanMN7/postgresql-dba-gym) |
 | **OpenEnv**   | [meta-pytorch/OpenEnv](https://github.com/meta-pytorch/OpenEnv)                 |
 
+### Table of Contents
+
+- [Why DBA?](#why-dba)
+- [Live Demo](#live-demo)
+- [Tasks](#tasks)
+- [Real-World Impact](#real-world-impact)
+- [Value to the OpenEnv Ecosystem](#value-to-the-openenv-ecosystem)
+- [Architecture](#architecture)
+- [Repository Structure](#repository-structure)
+- [Setup & Installation](#setup--installation)
+- [Running the Demo](#running-the-demo)
+- [Running the Baseline Agent](#running-the-baseline-agent-inferencepy)
+- [Local Terminal Output](#local-terminal-output)
+- [HTTP API](#http-api)
+- [Grading](#grading)
+- [Evaluation Results](#evaluation-results)
+- [Determinism](#determinism)
+- [Safety & Isolation](#safety--isolation)
+- [Deployment to Hugging Face Spaces](#deployment-to-hugging-face-spaces)
+- [Requirements](#requirements)
+- [Notes for Evaluators](#notes-for-evaluators)
+- [Roadmap / Future Tasks](#roadmap--future-tasks)
+
 ### What Makes This Different
 
 |                    | Spider / BIRD       | AgentBench-DB       | **This Gym**                        |
@@ -398,6 +421,10 @@ The `SUCCESS_THRESHOLD` (default `0.85`) defines when the env auto-flips `done=t
 
 Qwen run counts are post-environment-fix only (4 earlier runs hit a connection-pool bug — see *Environment hardening* below). DeepSeek-R1 is excluded from ranking due to websocket timeout preventing evaluation beyond the easy task.
 
+![Model Leaderboard — Best Aggregate Score](screenshots/benchmark_leaderboard.png)
+
+![Best Per-Task Score by Model](screenshots/benchmark_heatmap.png)
+
 ### Score Matrix
 
 <details>
@@ -472,7 +499,9 @@ The medium task (schema migration) is the single best predictor of model capabil
 | gpt-3.5-turbo | 33% (1/3) | 23-step degenerate retry loop (identical INSERT) |
 | Llama-3.1-8B | 0% (0/3) | Column-name retry loop + context window exhaustion |
 
-The critical skill gap: models that query `information_schema` early (Gemma, DeepSeek-R1) discover the correct column names immediately. Models that guess first waste 5–10 steps in retry loops.
+The critical skill gap: models that query `information_schema` early (Gemma, DeepSeek-R1) discover the correct column names immediately. Models that guess first waste 5-10 steps in retry loops.
+
+![Medium Task Pass Rate](screenshots/medium_pass_rate.png)
 
 #### Unique model behavioral signatures
 
