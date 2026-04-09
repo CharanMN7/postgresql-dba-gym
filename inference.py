@@ -8,9 +8,9 @@ a pre-running server at ``ENV_URL`` (the local-dev path).
 
 Environment variables
 ---------------------
-``HF_TOKEN``      — API key (the hackathon-mandated variable name; ``API_KEY`` also accepted).
-``API_BASE_URL``  — LLM API base URL (default: ``https://router.huggingface.co/v1``).
-``MODEL_NAME``    — LLM model id (default: ``Qwen/Qwen2.5-72B-Instruct``).
+``HF_TOKEN``      — OpenAI API key (the hackathon-mandated variable name; ``API_KEY`` also accepted).
+``API_BASE_URL``  — OpenAI API base URL (default: ``https://api.openai.com/v1``).
+``MODEL_NAME``    — OpenAI model id (default: ``gpt-4o-mini``).
 ``IMAGE_NAME``    — if set (or ``LOCAL_IMAGE_NAME``),
                     ``GenericEnvClient.from_docker_image`` is used to spin up
                     a fresh container for the run.
@@ -109,8 +109,8 @@ DEFAULT_MAX_STEPS = 25
 SUCCESS_THRESHOLD = 0.85
 
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.openai.com/v1"
+MODEL_NAME = os.getenv("MODEL_NAME") or "gpt-4o-mini"
 IMAGE_NAME = os.getenv("IMAGE_NAME") or os.getenv("LOCAL_IMAGE_NAME")
 ENV_URL = os.getenv("ENV_URL", "http://localhost:8000").rstrip("/")
 
