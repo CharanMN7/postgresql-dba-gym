@@ -35,37 +35,53 @@ Five DBA tasks against a live PostgreSQL 16 instance, graded **deterministically
 
 ### Table of Contents
 
-- [Why DBA?](#why-dba)
-- [Live Demo](#live-demo)
-- [Tasks](#tasks)
-- [Real-World Impact](#real-world-impact)
-- [Value to the OpenEnv Ecosystem](#value-to-the-openenv-ecosystem)
-- [Architecture](#architecture)
-- [Repository Structure](#repository-structure)
-- [Setup & Installation](#setup--installation)
-- [Running the Demo](#running-the-demo)
-- [Running the Baseline Agent](#running-the-baseline-agent-inferencepy)
-- [Local Terminal Output](#local-terminal-output)
-- [HTTP API](#http-api)
-- [Grading](#grading)
-- [Evaluation Results](#evaluation-results)
-- [Determinism](#determinism)
-- [Safety & Isolation](#safety--isolation)
-- [Deployment to Hugging Face Spaces](#deployment-to-hugging-face-spaces)
-- [Requirements](#requirements)
-- [Notes for Evaluators](#notes-for-evaluators)
-- [Roadmap / Future Tasks](#roadmap--future-tasks)
+- [PostgreSQL DBA Gym](#postgresql-dba-gym)
+    - [Table of Contents](#table-of-contents)
+    - [What Makes This Different](#what-makes-this-different)
+  - [Why DBA?](#why-dba)
+  - [Live Demo](#live-demo)
+  - [Tasks](#tasks)
+    - [Difficulty progression](#difficulty-progression)
+  - [Real-World Impact](#real-world-impact)
+  - [Value to the OpenEnv Ecosystem](#value-to-the-openenv-ecosystem)
+  - [Architecture](#architecture)
+  - [Repository Structure](#repository-structure)
+  - [Setup \& Installation](#setup--installation)
+    - [Prerequisites](#prerequisites)
+    - [Quick start (Docker Compose — recommended)](#quick-start-docker-compose--recommended)
+    - [Alternative: raw `docker build` / `docker run`](#alternative-raw-docker-build--docker-run)
+  - [Running the Demo](#running-the-demo)
+  - [Running the Baseline Agent (`inference.py`)](#running-the-baseline-agent-inferencepy)
+    - [Environment variables](#environment-variables)
+    - [Log output format](#log-output-format)
+  - [Local Terminal Output](#local-terminal-output)
+  - [HTTP API](#http-api)
+  - [Grading](#grading)
+  - [Evaluation Results](#evaluation-results)
+    - [Model Ranking](#model-ranking)
+    - [Score Matrix](#score-matrix)
+    - [What We Learned](#what-we-learned)
+      - [Medium task as the sharpest discriminator](#medium-task-as-the-sharpest-discriminator)
+      - [Unique model behavioral signatures](#unique-model-behavioral-signatures)
+      - [Environment hardening through adversarial testing](#environment-hardening-through-adversarial-testing)
+      - [Cost of evaluation](#cost-of-evaluation)
+  - [Determinism](#determinism)
+  - [Safety \& Isolation](#safety--isolation)
+  - [Deployment to Hugging Face Spaces](#deployment-to-hugging-face-spaces)
+  - [Requirements](#requirements)
+  - [Notes for Evaluators](#notes-for-evaluators)
+  - [Roadmap / Future Tasks](#roadmap--future-tasks)
 
 ### What Makes This Different
 
-|                    | Spider / BIRD       | AgentBench-DB       | **This Gym**                        |
-| ------------------ | ------------------- | ------------------- | ----------------------------------- |
-| **Task type**      | Text-to-SQL         | Text-to-SQL         | Operational DBA                     |
-| **Live database**  | No                  | Limited             | Full PostgreSQL 16                  |
-| **Multi-step**     | No                  | Minimal             | 5–25 steps per task                 |
-| **Grading**        | Execution match     | Execution match     | SQL catalog assertions              |
-| **Difficulty curve**| Flat               | Flat                | 5 levels, escalating thresholds     |
-| **RL-trainable**   | No (static)         | No (static)         | Yes (OpenEnv gym API)               |
+|                      | Spider / BIRD   | AgentBench-DB   | **This Gym**                    |
+| -------------------- | --------------- | --------------- | ------------------------------- |
+| **Task type**        | Text-to-SQL     | Text-to-SQL     | Operational DBA                 |
+| **Live database**    | No              | Limited         | Full PostgreSQL 16              |
+| **Multi-step**       | No              | Minimal         | 5–25 steps per task             |
+| **Grading**          | Execution match | Execution match | SQL catalog assertions          |
+| **Difficulty curve** | Flat            | Flat            | 5 levels, escalating thresholds |
+| **RL-trainable**     | No (static)     | No (static)     | Yes (OpenEnv gym API)           |
 
 [Spider](https://yale-lily.github.io/spider) (Yale, 2018) and [BIRD](https://bird-bench.github.io/) (NeurIPS 2024) test text-to-SQL generation — the agent writes a SELECT and the benchmark checks execution output. [AgentBench](https://arxiv.org/abs/2308.03688) (Tsinghua, ICLR 2024) has a "Database" track that's still SQL querying against MySQL/SQLite. [Spider 2.0](https://arxiv.org/abs/2411.07763) (2024) added enterprise complexity but the task is still query generation — the best model (o1-preview) hits only 21.3%. None of these test whether an agent can *diagnose why a query is slow*, *fix a schema without breaking reads*, or *triage four simultaneous failures on a live cluster*. That's operational DBA work, and that's what this gym trains.
 
@@ -408,16 +424,16 @@ The `SUCCESS_THRESHOLD` (default `0.85`) defines when the env auto-flips `done=t
 
 ### Model Ranking
 
-| Tier | Model | Type | Params | Runs | Mean | Best |
-|------|-------|------|--------|-----:|-----:|-----:|
-| **S** | `gpt-4o-mini` | Closed | — | 3 | 4.947 | **5.000** |
-| **A** | `google/gemma-3-27b-it` | Open | 27B dense | 3 | 4.815 | 4.825 |
-| **A** | `meta-llama/Llama-3.3-70B-Instruct` | Open | 70B dense | 3 | 4.798 | 4.825 |
-| **A** | `meta-llama/Llama-4-Scout-17B-16E-Instruct` | Open | 17B MoE | 4 | 4.754 | 4.825 |
-| **A** | `Qwen/Qwen2.5-72B-Instruct` | Open | 72B dense | 2 | 4.700 | 4.825 |
-| **A−** | `gpt-3.5-turbo` | Closed | — | 3 | 4.595 | 4.865 |
-| **C** | `meta-llama/Llama-3.1-8B-Instruct` | Open | 8B dense | 3 | 3.283 | 3.530 |
-| — | `deepseek-ai/DeepSeek-R1` | Open | 671B MoE | 1 | — | — |
+| Tier   | Model                                       | Type   | Params    | Runs |  Mean |      Best |
+| ------ | ------------------------------------------- | ------ | --------- | ---: | ----: | --------: |
+| **S**  | `gpt-4o-mini`                               | Closed | —         |    3 | 4.947 | **5.000** |
+| **A**  | `google/gemma-3-27b-it`                     | Open   | 27B dense |    3 | 4.815 |     4.825 |
+| **A**  | `meta-llama/Llama-3.3-70B-Instruct`         | Open   | 70B dense |    3 | 4.798 |     4.825 |
+| **A**  | `meta-llama/Llama-4-Scout-17B-16E-Instruct` | Open   | 17B MoE   |    4 | 4.754 |     4.825 |
+| **A**  | `Qwen/Qwen2.5-72B-Instruct`                 | Open   | 72B dense |    2 | 4.700 |     4.825 |
+| **A−** | `gpt-3.5-turbo`                             | Closed | —         |    3 | 4.595 |     4.865 |
+| **C**  | `meta-llama/Llama-3.1-8B-Instruct`          | Open   | 8B dense  |    3 | 3.283 |     3.530 |
+| —      | `deepseek-ai/DeepSeek-R1`                   | Open   | 671B MoE  |    1 |     — |         — |
 
 Qwen run counts are post-environment-fix only (4 earlier runs hit a connection-pool bug — see *Environment hardening* below). DeepSeek-R1 is excluded from ranking due to websocket timeout preventing evaluation beyond the easy task.
 
@@ -432,18 +448,18 @@ Qwen run counts are post-environment-fix only (4 earlier runs hit a connection-p
 
 Runs 1–4 tested only the first three tasks while expert and master were being built. The hard SUCCESS_THRESHOLD was raised from 0.85 → 0.95 after Run 3, and the expert threshold from 0.95 → 0.98 after Run 5.
 
-| Run | Model | easy | medium | hard | expert | master | aggregate |
-|----:|-------|-----:|-------:|-----:|-------:|-------:|----------:|
-| 1 | `gpt-4o` | 1.00 | 0.865 | 1.000 | — | — | 2.865 / 3 |
-| 2 | `gpt-4o-mini` | 1.00 | 1.000 | 0.917 | — | — | 2.917 / 3 |
-| 3 | `gpt-4o-mini` | 1.00 | 0.920 | 0.917 | — | — | 2.837 / 3 |
-| 4 | `gpt-4o-mini` | 1.00 | 0.920 | 1.000 | — | — | 2.920 / 3 |
-| 5 | `gpt-4o-mini` | 1.00 | 1.000 | 1.000 | 0.960 | 1.000 | 4.960 / 5 |
-| 6 | `gpt-4o-mini` | 1.00 | 0.920 | 1.000 | 0.960 | 1.000 | 4.880 / 5 |
-| 7 | `gpt-4o-mini` | 1.00 | 1.000 | 1.000 | 1.000 | 1.000 | **5.000 / 5** |
-| 8 | `gpt-3.5-turbo` | 1.00 | 0.865 | 1.000 | 1.000 | 1.000 | 4.865 / 5 |
-| 9 | `gpt-3.5-turbo` | 1.00 | 0.500 | 1.000 | 0.960 | 1.000 | 4.460 / 5 |
-| 10 | `gpt-3.5-turbo` | 1.00 | 0.500 | 1.000 | 0.960 | 1.000 | 4.460 / 5 |
+|  Run | Model           | easy | medium |  hard | expert | master |     aggregate |
+| ---: | --------------- | ---: | -----: | ----: | -----: | -----: | ------------: |
+|    1 | `gpt-4o`        | 1.00 |  0.865 | 1.000 |      — |      — |     2.865 / 3 |
+|    2 | `gpt-4o-mini`   | 1.00 |  1.000 | 0.917 |      — |      — |     2.917 / 3 |
+|    3 | `gpt-4o-mini`   | 1.00 |  0.920 | 0.917 |      — |      — |     2.837 / 3 |
+|    4 | `gpt-4o-mini`   | 1.00 |  0.920 | 1.000 |      — |      — |     2.920 / 3 |
+|    5 | `gpt-4o-mini`   | 1.00 |  1.000 | 1.000 |  0.960 |  1.000 |     4.960 / 5 |
+|    6 | `gpt-4o-mini`   | 1.00 |  0.920 | 1.000 |  0.960 |  1.000 |     4.880 / 5 |
+|    7 | `gpt-4o-mini`   | 1.00 |  1.000 | 1.000 |  1.000 |  1.000 | **5.000 / 5** |
+|    8 | `gpt-3.5-turbo` | 1.00 |  0.865 | 1.000 |  1.000 |  1.000 |     4.865 / 5 |
+|    9 | `gpt-3.5-turbo` | 1.00 |  0.500 | 1.000 |  0.960 |  1.000 |     4.460 / 5 |
+|   10 | `gpt-3.5-turbo` | 1.00 |  0.500 | 1.000 |  0.960 |  1.000 |     4.460 / 5 |
 
 - **Run 7** is the first (and only) perfect 5.000 / 5.0 across all five tasks.
 - **Runs 9–10** reproduce an identical `gpt-3.5-turbo` failure: a 23-step degenerate loop on medium (same INSERT every step), confirming the tasks create deterministic capability gradients at temperature 0.2.
@@ -453,28 +469,28 @@ Runs 1–4 tested only the first three tasks while expert and master were being 
 <details>
 <summary><strong>Open model evaluation — Runs 11–31</strong></summary>
 
-| Run | Model | easy | medium | hard | expert | master | aggregate |
-|----:|-------|-----:|-------:|-----:|-------:|-------:|----------:|
-| 11 | Llama-3.1-8B | 0.990 | 0.550 | 0.010 | 0.990 | 0.990 | 3.530 |
-| 12 | Llama-3.1-8B | 0.990 | 0.500 | 0.010 | 0.410 | 0.990 | 2.900 |
-| 13 | Llama-3.1-8B | 0.990 | 0.438 | 0.010 | 0.990 | 0.990 | 3.418 |
-| 14 | Llama-3.3-70B | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
-| 15 | Llama-3.3-70B | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
-| 16 | Llama-3.3-70B | 0.990 | 0.785 | 0.990 | 0.990 | 0.990 | 4.745 |
-| 17 | Gemma-3-27B | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
-| 18 | Gemma-3-27B | 0.990 | 0.865 | 0.990 | 0.960 | 0.990 | 4.795 |
-| 19 | Gemma-3-27B | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
-| 20 | Qwen2.5-72B | 0.990 | 0.865 | 0.990 | 0.010 | 0.010 | 2.865 ⚠ |
-| 21 | Qwen2.5-72B | 0.990 | 0.615 | 0.990 | 0.010 | 0.010 | 2.615 ⚠ |
-| 22 | Qwen2.5-72B | 0.990 | 0.615 | 0.990 | 0.990 | 0.990 | 4.575 |
-| 24 | Qwen2.5-72B | 0.990 | 0.615 | 0.990 | 0.010 | 0.010 | 2.615 ⚠ |
-| 25 | Qwen2.5-72B | 0.990 | 0.615 | 0.990 | 0.990 | 0.990 | 4.575 |
-| 26 | Qwen2.5-72B | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
-| 27 | Llama-4-Scout | 0.990 | 0.785 | 0.990 | 0.990 | 0.990 | 4.745 |
-| 28 | Llama-4-Scout | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
-| 29 | Llama-4-Scout | 0.990 | 0.660 | 0.990 | 0.990 | 0.990 | 4.620 |
-| 30 | Llama-4-Scout | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
-| 31 | DeepSeek-R1 | 0.990 | 0.010 | 0.010 | 0.010 | 0.010 | 1.030 ⚡ |
+|  Run | Model         |  easy | medium |  hard | expert | master | aggregate |
+| ---: | ------------- | ----: | -----: | ----: | -----: | -----: | --------: |
+|   11 | Llama-3.1-8B  | 0.990 |  0.550 | 0.010 |  0.990 |  0.990 |     3.530 |
+|   12 | Llama-3.1-8B  | 0.990 |  0.500 | 0.010 |  0.410 |  0.990 |     2.900 |
+|   13 | Llama-3.1-8B  | 0.990 |  0.438 | 0.010 |  0.990 |  0.990 |     3.418 |
+|   14 | Llama-3.3-70B | 0.990 |  0.865 | 0.990 |  0.990 |  0.990 |     4.825 |
+|   15 | Llama-3.3-70B | 0.990 |  0.865 | 0.990 |  0.990 |  0.990 |     4.825 |
+|   16 | Llama-3.3-70B | 0.990 |  0.785 | 0.990 |  0.990 |  0.990 |     4.745 |
+|   17 | Gemma-3-27B   | 0.990 |  0.865 | 0.990 |  0.990 |  0.990 |     4.825 |
+|   18 | Gemma-3-27B   | 0.990 |  0.865 | 0.990 |  0.960 |  0.990 |     4.795 |
+|   19 | Gemma-3-27B   | 0.990 |  0.865 | 0.990 |  0.990 |  0.990 |     4.825 |
+|   20 | Qwen2.5-72B   | 0.990 |  0.865 | 0.990 |  0.010 |  0.010 |   2.865 ⚠ |
+|   21 | Qwen2.5-72B   | 0.990 |  0.615 | 0.990 |  0.010 |  0.010 |   2.615 ⚠ |
+|   22 | Qwen2.5-72B   | 0.990 |  0.615 | 0.990 |  0.990 |  0.990 |     4.575 |
+|   24 | Qwen2.5-72B   | 0.990 |  0.615 | 0.990 |  0.010 |  0.010 |   2.615 ⚠ |
+|   25 | Qwen2.5-72B   | 0.990 |  0.615 | 0.990 |  0.990 |  0.990 |     4.575 |
+|   26 | Qwen2.5-72B   | 0.990 |  0.865 | 0.990 |  0.990 |  0.990 |     4.825 |
+|   27 | Llama-4-Scout | 0.990 |  0.785 | 0.990 |  0.990 |  0.990 |     4.745 |
+|   28 | Llama-4-Scout | 0.990 |  0.865 | 0.990 |  0.990 |  0.990 |     4.825 |
+|   29 | Llama-4-Scout | 0.990 |  0.660 | 0.990 |  0.990 |  0.990 |     4.620 |
+|   30 | Llama-4-Scout | 0.990 |  0.865 | 0.990 |  0.990 |  0.990 |     4.825 |
+|   31 | DeepSeek-R1   | 0.990 |  0.010 | 0.010 |  0.010 |  0.010 |   1.030 ⚡ |
 
 ⚠ = environment bug (stale transaction in connection pool, fixed after Run 24).
 ⚡ = infrastructure failure (websocket keepalive timeout at inference provider).
@@ -489,15 +505,15 @@ The evaluation was as much about hardening the environment as it was about ranki
 
 The medium task (schema migration) is the single best predictor of model capability. It requires discovering column names (`customer_name`, not `name`) from an unfamiliar source table, creating multiple tables with constraints, migrating data, and constructing a backward-compatible view — all without being told the schema. Pass rates range from 0% (Llama-3.1-8B) to 100% (gpt-4o-mini, Gemma-3-27B):
 
-| Model | Medium pass rate | Typical failure mode |
-|-------|:----------------:|----------------------|
-| gpt-4o-mini | 100% (3/3) | — |
-| Gemma-3-27B | 100% (3/3) | — |
-| Llama-3.3-70B | 67% (2/3) | Premature `done=true` before view aliases |
-| Llama-4-Scout | 50% (2/4) | JSON format errors + destructive `DROP TABLE` spiral |
-| Qwen2.5-72B | 50% (1/2) | `o.row_id` hallucination (column doesn't exist) |
-| gpt-3.5-turbo | 33% (1/3) | 23-step degenerate retry loop (identical INSERT) |
-| Llama-3.1-8B | 0% (0/3) | Column-name retry loop + context window exhaustion |
+| Model         | Medium pass rate | Typical failure mode                                 |
+| ------------- | :--------------: | ---------------------------------------------------- |
+| gpt-4o-mini   |    100% (3/3)    | —                                                    |
+| Gemma-3-27B   |    100% (3/3)    | —                                                    |
+| Llama-3.3-70B |    67% (2/3)     | Premature `done=true` before view aliases            |
+| Llama-4-Scout |    50% (2/4)     | JSON format errors + destructive `DROP TABLE` spiral |
+| Qwen2.5-72B   |    50% (1/2)     | `o.row_id` hallucination (column doesn't exist)      |
+| gpt-3.5-turbo |    33% (1/3)     | 23-step degenerate retry loop (identical INSERT)     |
+| Llama-3.1-8B  |     0% (0/3)     | Column-name retry loop + context window exhaustion   |
 
 The critical skill gap: models that query `information_schema` early (Gemma, DeepSeek-R1) discover the correct column names immediately. Models that guess first waste 5-10 steps in retry loops.
 
@@ -523,6 +539,25 @@ Three environment improvements emerged directly from model-driven testing:
 
 **3. Destructive action guard validation (Run 29).** Llama-4-Scout's medium catastrophe — dropping tables, losing data, and then entering an 8-iteration `TRUNCATE`/`DELETE` loop — validated the `_DESTRUCTIVE_PATTERNS` guard in `postgres_dba_gym_environment.py`. The guard correctly prevented further damage while returning `destructive_action_blocked` as an error observation so the model could (in theory) learn from it.
 
+#### Cost of evaluation
+
+The entire 31-run evaluation across 8 models cost **$0.54** — less than a single GPT-4o API call. Open-source models were evaluated via the [Hugging Face Inference API](https://huggingface.co/docs/api-inference/), and closed models via the OpenAI API (69 chat completions total, at [current per-token pricing](https://openai.com/api/pricing)).
+
+| Model                                | Provider     | Requests |      Cost |
+| ------------------------------------ | ------------ | :------: | --------: |
+| Qwen2.5-72B                          | HF Inference |   230    |     $0.18 |
+| Llama-3.3-70B                        | HF Inference |    73    |     $0.09 |
+| Llama-4-Scout                        | HF Inference |   140    |     $0.06 |
+| Gemma-3-27B                          | HF Inference |    85    |     $0.05 |
+| Llama-3.1-8B                         | HF Inference |   141    |     $0.05 |
+| DeepSeek-R1                          | HF Inference |    4     |     $0.02 |
+| gpt-4o / gpt-4o-mini / gpt-3.5-turbo | OpenAI       |    69    |   ~$0.09* |
+| **Total**                            |              | **742**  | **$0.54** |
+
+![Cost vs Performance](screenshots/cost_vs_performance.png)
+
+![HF Inference API usage for open model evaluation](screenshots/open_models_costs.png)
+> *approximate value
 ---
 
 ## Determinism
