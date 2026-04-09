@@ -108,7 +108,7 @@ TASK_ORDER: List[str] = [
 DEFAULT_MAX_STEPS = 25
 SUCCESS_THRESHOLD = 0.85
 
-_SCORE_EPS = 1e-4
+_SCORE_EPS = 0.01
 
 
 def _clamp_score(score: float) -> float:

@@ -47,6 +47,7 @@ try:
         is_meta_command,
         translate_meta_command,
     )
+    from .tasks.base import clamp_reward
 except ImportError:  # pragma: no cover - fallback for flat imports
     from models import DBAAction, DBAObservation, DBAState
     from server.db import (
@@ -55,6 +56,7 @@ except ImportError:  # pragma: no cover - fallback for flat imports
         is_meta_command,
         translate_meta_command,
     )
+    from server.tasks.base import clamp_reward
 
 import re as _re
 
@@ -202,15 +204,13 @@ class PostgresDBAEnvironment(Environment[DBAAction, DBAObservation, DBAState]):
         self._state.step_count += 1
 
         if self._current_task is None:
-            # Auto-recover: nothing to do, just hand back a placeholder
-            # so the agent learns it must call /reset first.
             return DBAObservation(
                 output="No active task. Call POST /reset first.",
                 error="no_active_task",
                 step_index=self._state.step_count,
                 max_steps=self._state.max_steps,
                 done=True,
-                reward=0.0,
+                reward=clamp_reward(0.0),
             )
 
         # Destructive-action guard: refuse obviously dangerous SQL without
@@ -231,7 +231,7 @@ class PostgresDBAEnvironment(Environment[DBAAction, DBAObservation, DBAState]):
                 max_steps=self._state.max_steps,
                 grading_breakdown=None,
                 done=False,
-                reward=self._state.last_reward,
+                reward=clamp_reward(self._state.last_reward),
             )
 
         rows, rowcount, ms, err = self._execute_sql(action.sql)
@@ -260,6 +260,8 @@ class PostgresDBAEnvironment(Environment[DBAAction, DBAObservation, DBAState]):
         if grading_notes:
             output = f"{output}\n--\n" + "\n".join(grading_notes)
 
+        clamped_score = clamp_reward(grading_score)
+
         observation = DBAObservation(
             output=output,
             rows=rows,
@@ -271,10 +273,10 @@ class PostgresDBAEnvironment(Environment[DBAAction, DBAObservation, DBAState]):
             max_steps=self._state.max_steps,
             grading_breakdown=grading_breakdown,
             done=done,
-            reward=grading_score,
+            reward=clamped_score,
         )
 
-        self._state.last_reward = grading_score
+        self._state.last_reward = clamped_score
         self._state.done = done
         return observation
 
@@ -344,7 +346,7 @@ class PostgresDBAEnvironment(Environment[DBAAction, DBAObservation, DBAState]):
         result = self._current_task.grade(self)
         return {
             "task": self._state.task_name,
-            "score": result.score,
+            "score": clamp_reward(result.score),
             "breakdown": result.breakdown,
             "notes": result.notes,
         }

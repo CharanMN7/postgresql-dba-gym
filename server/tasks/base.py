@@ -25,6 +25,18 @@ if TYPE_CHECKING:
     from server.postgres_dba_gym_environment import PostgresDBAEnvironment
 
 
+_SCORE_EPS = 0.01
+
+
+def clamp_reward(score: float) -> float:
+    """Clamp a reward into the open interval (0, 1).
+
+    The OpenEnv validator rejects exact 0.0 and 1.0 — every task score
+    must be strictly between 0 and 1.
+    """
+    return max(_SCORE_EPS, min(1.0 - _SCORE_EPS, score))
+
+
 @dataclass
 class GradingResult:
     """A grader's return value.
@@ -102,7 +114,7 @@ class BaseTask(ABC):
             step_index=0,
             max_steps=self.MAX_STEPS,
             done=False,
-            reward=0.0,
+            reward=clamp_reward(0.0),
             grading_breakdown={},
         )
 
@@ -146,4 +158,4 @@ class BaseTask(ABC):
         )
 
 
-__all__ = ["BaseTask", "GradingResult"]
+__all__ = ["BaseTask", "GradingResult", "clamp_reward"]
