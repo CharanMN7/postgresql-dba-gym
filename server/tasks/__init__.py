@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from typing import Dict
 
+from server.tasks.backup_recovery import BackupRecoveryTask
 from server.tasks.base import BaseTask
 from server.tasks.index_optimization import IndexOptimizationTask
 from server.tasks.performance_diagnosis import PerformanceDiagnosisTask
 from server.tasks.schema_migration import SchemaMigrationTask
+from server.tasks.security_audit import SecurityAuditTask
 
 
 def build_task_registry() -> Dict[str, BaseTask]:
@@ -20,6 +22,8 @@ def build_task_registry() -> Dict[str, BaseTask]:
         "easy": IndexOptimizationTask(),
         "medium": SchemaMigrationTask(),
         "hard": PerformanceDiagnosisTask(),
+        "backup_recovery": BackupRecoveryTask(),
+        "security_audit": SecurityAuditTask(),
     }
 
 

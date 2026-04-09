@@ -72,7 +72,7 @@ app = create_app(
 
 @app.get("/tasks", tags=["Environment Info"])
 def list_tasks():
-    """Return descriptors for all three DBA tasks."""
+    """Return descriptors for all registered DBA tasks."""
     return {"tasks": _ENV.list_tasks()}
 
 
