@@ -42,7 +42,7 @@ class BackupRecoveryTask(BaseTask):
     # Data loss is binary — we require all four sub-rubrics to land for
     # "success". 0.85 would let 3-of-4 slip through, which isn't a real
     # recovery.
-    SUCCESS_THRESHOLD = 0.95
+    SUCCESS_THRESHOLD = 0.98
     SEED_PATH = Path("/app/sql/seed_backup_recovery.sql")
 
     # ------------------------------------------------------------------
