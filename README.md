@@ -582,7 +582,6 @@ The entire 31-run evaluation across 8 models cost **$0.54** — less than a sing
 
 ![Cost vs Performance](screenshots/cost_vs_performance.png)
 
-![HF Inference API usage for open model evaluation](screenshots/open_models_costs.png)
 > *approximate value
 
 #### Scaling Economics: From Evaluation to RL Training
