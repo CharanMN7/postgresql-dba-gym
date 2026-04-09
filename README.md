@@ -205,6 +205,8 @@ postgresql-dba-gym/
 │   ├── seed_backup_recovery.sql
 │   └── seed_security_audit.sql
 │
+├── notes/                       # Per-run annotated evaluation traces (31 runs)
+│
 └── scripts/
     ├── start.sh              # Container entrypoint: pg_ctl → bootstrap → uvicorn
     └── smoke_test.sh         # Curl-based health + reset verification
@@ -377,33 +379,120 @@ The `SUCCESS_THRESHOLD` (default `0.85`) defines when the env auto-flips `done=t
 
 ---
 
-## Baseline Scores
+## Evaluation Results
 
-All runs used `inference.py` with temperature 0.2 and default `max_steps = 25`. Scores are per-task reward in `[0, 1]` at episode end.
+31 inference runs across 8 models — from 8B to 671B parameters, open and closed, dense and Mixture of Experts. The evaluation was conducted iteratively: early runs calibrated grading thresholds and uncovered environment bugs; later runs established the model ranking on the hardened environment. All runs used `inference.py` with temperature 0.2 and `max_steps = 25`. Per-run annotated traces are in [`notes/`](notes/).
 
-| Run                      | easy | medium |  hard | expert | master |       aggregate |
-| ------------------------ | ---: | -----: | ----: | -----: | -----: | --------------: |
-| Run 1 (`gpt-4o`)         | 1.00 |  0.865 | 1.000 |      — |      — |     2.865 / 3.0 |
-| Run 2 (`gpt-4o-mini`)    | 1.00 |  1.000 | 0.917 |      — |      — |     2.917 / 3.0 |
-| Run 3 (`gpt-4o-mini`)    | 1.00 |  0.920 | 0.917 |      — |      — |     2.837 / 3.0 |
-| Run 4 (`gpt-4o-mini`)    | 1.00 |  0.920 | 1.000 |      — |      — |     2.920 / 3.0 |
-| Run 5 (`gpt-4o-mini`)    | 1.00 |  1.000 | 1.000 |  0.960 |  1.000 |     4.960 / 5.0 |
-| Run 6 (`gpt-4o-mini`)    | 1.00 |  0.920 | 1.000 |  0.960 |  1.000 |     4.880 / 5.0 |
-| Run 7 (`gpt-4o-mini`)    | 1.00 |  1.000 | 1.000 |  1.000 |  1.000 | **5.000 / 5.0** |
-| Run 8 (`gpt-3.5-turbo`)  | 1.00 |  0.865 | 1.000 |  1.000 |  1.000 |     4.865 / 5.0 |
-| Run 9 (`gpt-3.5-turbo`)  | 1.00 |  0.500 | 1.000 |  0.960 |  1.000 |     4.460 / 5.0 |
-| Run 10 (`gpt-3.5-turbo`) | 1.00 |  0.500 | 1.000 |  0.960 |  1.000 |     4.460 / 5.0 |
+### Model Ranking
 
-Notes:
+| Tier | Model | Type | Params | Runs | Mean | Best |
+|------|-------|------|--------|-----:|-----:|-----:|
+| **S** | `gpt-4o-mini` | Closed | — | 3 | 4.947 | **5.000** |
+| **A** | `google/gemma-3-27b-it` | Open | 27B dense | 3 | 4.815 | 4.825 |
+| **A** | `meta-llama/Llama-3.3-70B-Instruct` | Open | 70B dense | 3 | 4.798 | 4.825 |
+| **A** | `meta-llama/Llama-4-Scout-17B-16E-Instruct` | Open | 17B MoE | 4 | 4.754 | 4.825 |
+| **A** | `Qwen/Qwen2.5-72B-Instruct` | Open | 72B dense | 2 | 4.700 | 4.825 |
+| **A−** | `gpt-3.5-turbo` | Closed | — | 3 | 4.595 | 4.865 |
+| **C** | `meta-llama/Llama-3.1-8B-Instruct` | Open | 8B dense | 3 | 3.283 | 3.530 |
+| — | `deepseek-ai/DeepSeek-R1` | Open | 671B MoE | 1 | — | — |
 
-- Run 7 is the first perfect 5.0/5.0 across all five tasks.
-- Run 8 shows the environment is solvable even with the much cheaper `gpt-3.5-turbo`. It loses 0.135 on medium but scores 1.0 on the remaining four tasks.
-- Runs 9 and 10 reproduce the same `gpt-3.5-turbo` failure mode: a 23-step degenerate loop on medium (identical action every step) and expert capped at 0.96 by the `customer_id` → `id` column-name error on the final balance-repair step. The identical 4.460 aggregate across both runs suggests this is the deterministic floor for 3.5-turbo on this environment at temperature 0.2.
-- All runs validated: deterministic seeds, `sqlparse`-based multi-statement execution, error-as-observation recovery, and grading sub-rubric visibility via `grading_breakdown`.
+Qwen run counts are post-environment-fix only (4 earlier runs hit a connection-pool bug — see *Environment hardening* below). DeepSeek-R1 is excluded from ranking due to websocket timeout preventing evaluation beyond the easy task.
 
-**Difficulty discrimination.** The medium task is the sharpest discriminator: `gpt-4o-mini` scores 1.0 while `gpt-3.5-turbo` reproducibly collapses into retry loops at 0.50. This confirms the tasks aren't just pass/fail — they create a meaningful capability gradient across model tiers.
+### Score Matrix
 
-Per-run annotated traces are in `notes/`.
+<details>
+<summary><strong>Development phase — Runs 1–10 (closed models, threshold calibration)</strong></summary>
+
+Runs 1–4 tested only the first three tasks while expert and master were being built. The hard SUCCESS_THRESHOLD was raised from 0.85 → 0.95 after Run 3, and the expert threshold from 0.95 → 0.98 after Run 5.
+
+| Run | Model | easy | medium | hard | expert | master | aggregate |
+|----:|-------|-----:|-------:|-----:|-------:|-------:|----------:|
+| 1 | `gpt-4o` | 1.00 | 0.865 | 1.000 | — | — | 2.865 / 3 |
+| 2 | `gpt-4o-mini` | 1.00 | 1.000 | 0.917 | — | — | 2.917 / 3 |
+| 3 | `gpt-4o-mini` | 1.00 | 0.920 | 0.917 | — | — | 2.837 / 3 |
+| 4 | `gpt-4o-mini` | 1.00 | 0.920 | 1.000 | — | — | 2.920 / 3 |
+| 5 | `gpt-4o-mini` | 1.00 | 1.000 | 1.000 | 0.960 | 1.000 | 4.960 / 5 |
+| 6 | `gpt-4o-mini` | 1.00 | 0.920 | 1.000 | 0.960 | 1.000 | 4.880 / 5 |
+| 7 | `gpt-4o-mini` | 1.00 | 1.000 | 1.000 | 1.000 | 1.000 | **5.000 / 5** |
+| 8 | `gpt-3.5-turbo` | 1.00 | 0.865 | 1.000 | 1.000 | 1.000 | 4.865 / 5 |
+| 9 | `gpt-3.5-turbo` | 1.00 | 0.500 | 1.000 | 0.960 | 1.000 | 4.460 / 5 |
+| 10 | `gpt-3.5-turbo` | 1.00 | 0.500 | 1.000 | 0.960 | 1.000 | 4.460 / 5 |
+
+- **Run 7** is the first (and only) perfect 5.000 / 5.0 across all five tasks.
+- **Runs 9–10** reproduce an identical `gpt-3.5-turbo` failure: a 23-step degenerate loop on medium (same INSERT every step), confirming the tasks create deterministic capability gradients at temperature 0.2.
+
+</details>
+
+<details>
+<summary><strong>Open model evaluation — Runs 11–31</strong></summary>
+
+| Run | Model | easy | medium | hard | expert | master | aggregate |
+|----:|-------|-----:|-------:|-----:|-------:|-------:|----------:|
+| 11 | Llama-3.1-8B | 0.990 | 0.550 | 0.010 | 0.990 | 0.990 | 3.530 |
+| 12 | Llama-3.1-8B | 0.990 | 0.500 | 0.010 | 0.410 | 0.990 | 2.900 |
+| 13 | Llama-3.1-8B | 0.990 | 0.438 | 0.010 | 0.990 | 0.990 | 3.418 |
+| 14 | Llama-3.3-70B | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
+| 15 | Llama-3.3-70B | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
+| 16 | Llama-3.3-70B | 0.990 | 0.785 | 0.990 | 0.990 | 0.990 | 4.745 |
+| 17 | Gemma-3-27B | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
+| 18 | Gemma-3-27B | 0.990 | 0.865 | 0.990 | 0.960 | 0.990 | 4.795 |
+| 19 | Gemma-3-27B | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
+| 20 | Qwen2.5-72B | 0.990 | 0.865 | 0.990 | 0.010 | 0.010 | 2.865 ⚠ |
+| 21 | Qwen2.5-72B | 0.990 | 0.615 | 0.990 | 0.010 | 0.010 | 2.615 ⚠ |
+| 22 | Qwen2.5-72B | 0.990 | 0.615 | 0.990 | 0.990 | 0.990 | 4.575 |
+| 24 | Qwen2.5-72B | 0.990 | 0.615 | 0.990 | 0.010 | 0.010 | 2.615 ⚠ |
+| 25 | Qwen2.5-72B | 0.990 | 0.615 | 0.990 | 0.990 | 0.990 | 4.575 |
+| 26 | Qwen2.5-72B | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
+| 27 | Llama-4-Scout | 0.990 | 0.785 | 0.990 | 0.990 | 0.990 | 4.745 |
+| 28 | Llama-4-Scout | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
+| 29 | Llama-4-Scout | 0.990 | 0.660 | 0.990 | 0.990 | 0.990 | 4.620 |
+| 30 | Llama-4-Scout | 0.990 | 0.865 | 0.990 | 0.990 | 0.990 | 4.825 |
+| 31 | DeepSeek-R1 | 0.990 | 0.010 | 0.010 | 0.010 | 0.010 | 1.030 ⚡ |
+
+⚠ = environment bug (stale transaction in connection pool, fixed after Run 24).
+⚡ = infrastructure failure (websocket keepalive timeout at inference provider).
+
+</details>
+
+### What We Learned
+
+The evaluation was as much about hardening the environment as it was about ranking models. Different models exercised fundamentally different code paths, and several uncovered bugs that only manifested with specific SQL patterns.
+
+#### Medium task as the sharpest discriminator
+
+The medium task (schema migration) is the single best predictor of model capability. It requires discovering column names (`customer_name`, not `name`) from an unfamiliar source table, creating multiple tables with constraints, migrating data, and constructing a backward-compatible view — all without being told the schema. Pass rates range from 0% (Llama-3.1-8B) to 100% (gpt-4o-mini, Gemma-3-27B):
+
+| Model | Medium pass rate | Typical failure mode |
+|-------|:----------------:|----------------------|
+| gpt-4o-mini | 100% (3/3) | — |
+| Gemma-3-27B | 100% (3/3) | — |
+| Llama-3.3-70B | 67% (2/3) | Premature `done=true` before view aliases |
+| Llama-4-Scout | 50% (2/4) | JSON format errors + destructive `DROP TABLE` spiral |
+| Qwen2.5-72B | 50% (1/2) | `o.row_id` hallucination (column doesn't exist) |
+| gpt-3.5-turbo | 33% (1/3) | 23-step degenerate retry loop (identical INSERT) |
+| Llama-3.1-8B | 0% (0/3) | Column-name retry loop + context window exhaustion |
+
+The critical skill gap: models that query `information_schema` early (Gemma, DeepSeek-R1) discover the correct column names immediately. Models that guess first waste 5–10 steps in retry loops.
+
+#### Unique model behavioral signatures
+
+Each model family developed distinctive problem-solving strategies that no other model exhibited:
+
+- **Qwen2.5-72B** wraps SQL in explicit `BEGIN; … COMMIT;` transactions and solves the master task (security audit) in a single 4-statement multi-action step — no other model combines all four sub-tasks into one.
+- **Llama-4-Scout** uses a textbook `LEFT JOIN … WHERE c.id IS NULL` anti-join for the expert task — the most SQL-elegant approach to inserting missing rows. When it avoids audit_log schema hallucination, it solves expert in 4 steps (tied with gpt-4o-mini for the record).
+- **Gemma-3-27B** uses `SELECT * FROM table LIMIT 10` to infer column names from data samples, bypassing `information_schema` entirely — a pragmatic DBA shortcut.
+- **DeepSeek-R1** (from its single completed task) checks existing indexes *before* creating one, then validates with `EXPLAIN ANALYZE` *after* — an inspect → act → verify workflow unique among all models.
+- **gpt-3.5-turbo** at temperature 0.2 enters a perfectly deterministic failure state: runs 9 and 10 produce the identical 4.460 aggregate with the identical 23-step medium loop, proving the environment creates reproducible capability gradients.
+
+#### Environment hardening through adversarial testing
+
+Three environment improvements emerged directly from model-driven testing:
+
+**1. Grading threshold calibration (Runs 2–5).** The hard task's `SUCCESS_THRESHOLD` was initially 0.85 — the same as medium. Run 2 showed `gpt-4o-mini` auto-completing at 0.85 with sub-rubrics left at 0, so the threshold was raised to 0.95. Similarly, expert's threshold was raised from 0.95 → 0.98 after Run 5 showed premature termination before the balance-repair step.
+
+**2. Connection-pool stale transaction bug (Runs 20–25).** Qwen's unique `BEGIN; … COMMIT;` wrapping exposed a critical bug: when an INSERT inside a `BEGIN` block errored, the `COMMIT` never executed, leaving the pooled connection in `TRANSACTION_STATUS_INERROR`. Subsequent `borrow_connection()` calls retrieved the poisoned connection, cascading "current transaction is aborted" errors across all remaining tasks and even across `make inference` invocations. The fix required two iterations — v1 (toggling `conn.autocommit`) failed silently because `psycopg2` raises when setting `autocommit` on an error-state connection. v2 introduced `_drain_stale_transaction()`, which sends a raw SQL `ROLLBACK` via cursor at both entry and exit of `borrow_connection()`. No other model would have triggered this bug because no other model uses explicit transactions.
+
+**3. Destructive action guard validation (Run 29).** Llama-4-Scout's medium catastrophe — dropping tables, losing data, and then entering an 8-iteration `TRUNCATE`/`DELETE` loop — validated the `_DESTRUCTIVE_PATTERNS` guard in `postgres_dba_gym_environment.py`. The guard correctly prevented further damage while returning `destructive_action_blocked` as an error observation so the model could (in theory) learn from it.
 
 ---
 
@@ -424,6 +513,8 @@ All seeds are written without `random()` — row values are derived from determi
 - Task 3's idle blocker runs on a *non-pool* connection and is forcibly terminated in `teardown()`.
 - Each step runs with `statement_timeout = 15s` so a runaway query cannot hang the episode.
 - `step()` never raises — psycopg2 errors are captured and returned in the observation's `error` field, so the agent learns to fix typos rather than crash the server.
+- **Stale transaction cleanup** (`_drain_stale_transaction` in `db.py`): When an agent issues explicit `BEGIN` and the subsequent statement errors before `COMMIT`, the pooled connection is left in `TRANSACTION_STATUS_INERROR`. The cleanup sends a raw SQL `ROLLBACK` via cursor at both entry and exit of every `borrow_connection()` call, preventing poisoned connections from cascading across tasks. Discovered through Qwen-72B testing (see *Environment hardening* in Evaluation Results).
+- **Destructive action guard** (`_DESTRUCTIVE_PATTERNS` in `postgres_dba_gym_environment.py`): Blocks `TRUNCATE`, `DELETE FROM` (without `WHERE`), `DROP DATABASE`, and `pg_terminate_backend(pg_backend_pid())`. Returns `destructive_action_blocked` as an error observation rather than executing the statement. Validated by Llama-4-Scout testing where the guard fired 8 times in a single episode.
 
 ---
 
@@ -499,7 +590,7 @@ See [`requirements.txt`](requirements.txt) and [`pyproject.toml`](pyproject.toml
 
 **Runtime correctness.** `inference.py` runs all 5 tasks end-to-end without errors. Cold-start latency inside the container is ~3-5 seconds (the Postgres cluster is pre-initialized at Docker build time). A full 5-task inference run completes in under 10 minutes on modest hardware (2 vCPU, 8 GB RAM).
 
-**Baseline performance.** The best run (Run 7, `gpt-4o-mini`) achieved a **perfect 5.000 / 5.0** aggregate score across all five tasks. `gpt-3.5-turbo` ranges from 4.865 (Run 8) down to 4.460 (Runs 9–10, where medium reproducibly collapses into a 23-step retry loop), confirming the tasks discriminate between model capabilities while remaining solvable by cheaper models.
+**Evaluation breadth.** 31 runs across 8 models (2 closed, 6 open; 8B to 671B; dense and MoE). The best run (`gpt-4o-mini`, Run 7) achieved a **perfect 5.000 / 5.0**. Five open models — Gemma-3-27B, Llama-3.3-70B, Llama-4-Scout-17B, Qwen2.5-72B, and even the much cheaper gpt-3.5-turbo — all score above 4.5, while Llama-3.1-8B at 3.283 demonstrates the tasks genuinely discriminate across capability tiers. The evaluation also drove three rounds of environment hardening (threshold calibration, stale-transaction fix, destructive-action guard validation). Detailed per-run traces are in [`notes/`](notes/).
 
 **Task design.** Five tasks spanning the full DBA spectrum — from single-index optimization to multi-symptom cluster triage to security hardening — with a clear difficulty progression (escalating success thresholds from 0.85 to 0.98), granular sub-rubric breakdowns, and deterministic seed data for reproducibility.
 
